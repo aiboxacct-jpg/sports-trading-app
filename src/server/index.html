@@ -154,8 +154,8 @@
     <div class="body">
       <div id="goalPath"></div>
       <table>
-        <thead><tr><th>Position</th><th>Entry</th><th>Game state</th><th>Now (¢)</th><th>Value</th><th>Unrealized P/P</th><th>Actions</th></tr></thead>
-        <tbody id="posBody"><tr><td colspan="7" class="muted">No open positions. Enter one in Pre-Game.</td></tr></tbody>
+        <thead><tr><th>Position</th><th>Entry</th><th>Game state</th><th>Now (¢)</th><th>Payout</th><th>Value</th><th>Unrealized P/P</th><th>Actions</th></tr></thead>
+        <tbody id="posBody"><tr><td colspan="8" class="muted">No open positions. Enter one in Pre-Game.</td></tr></tbody>
       </table>
       <div class="err" id="liveErr"></div>
       <div id="replacements"></div>
@@ -236,6 +236,7 @@ function renderSnapshot(snap) {
   const open = snap.positions.filter((p) => p.status === 'open');
   $('posBody').innerHTML = open.length ? open.map((p) => {
     const now = p.currentPriceCents ?? p.entryPriceCents;
+    const payoutX = Math.round((100 / now) * 10) / 10; // live payout multiple at the current price
     return `<tr>
       <td>${p.team ?? p.ticker}${p.opponent ? ' vs ' + p.opponent : ''}
         <span class="status-open">[open]</span><br>
@@ -245,13 +246,14 @@ function renderSnapshot(snap) {
         <button class="sm ghost" onclick="setState('${p.id}')">Set</button></td>
       <td><input type="number" id="np-${p.id}" value="${now}" min="1" max="99" style="width:60px">
         <button class="sm ghost" onclick="setPrice('${p.ticker}','np-${p.id}')">Set¢</button></td>
+      <td><b>${payoutX}×</b></td>
       <td>${fmt(p.currentValueCents)}</td>
       <td class="${cls(p.unrealizedPureProfitCents)}">${fmt(p.unrealizedPureProfitCents)}</td>
       <td>
         <button class="sm" onclick="closePos('${p.id}','np-${p.id}')">Close</button>
         <button class="sm ghost" onclick="settle('${p.id}','win')">Win</button>
         <button class="sm ghost" onclick="settle('${p.id}','loss')">Loss</button></td></tr>`;
-  }).join('') : '<tr><td colspan="7" class="muted">No open positions. Enter one in Pre-Game.</td></tr>';
+  }).join('') : '<tr><td colspan="8" class="muted">No open positions. Enter one in Pre-Game.</td></tr>';
   renderDecisions(snap);
 }
 

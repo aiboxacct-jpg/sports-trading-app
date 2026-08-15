@@ -8,7 +8,9 @@
 //   - a numbered decision list
 //
 // The strategy here sizes every candidate to the SAME target, so the decision is not
-// "who wins" but "which target-sized bet is the best use of capital right now."
+// "who wins" but "which target-sized bet to take now." Ranking is FAVORITES-FIRST:
+// market probability is the primary criterion, with reward/risk, capital efficiency,
+// and historical fit as tiebreakers among comparable favorites.
 
 import { assertPrice, fmt, fmtPrice } from '../domain/money.js';
 import { tradeFeeCents } from '../domain/fees.js';
@@ -97,13 +99,15 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical }) 
   const rewardPerRisk = sized.potentialProfitCents / sized.stakeCents;
 
   // component scores — reach is always met (sized to target), so it drops out.
-  const confidence = clamp01(impliedProb);
+  const confidence = clamp01(impliedProb);            // FAVORITES: the primary criterion
   const efficiency = capitalPct == null ? 0.5 : clamp01(1 - capitalPct / 100); // cheaper = better
   const rr = rewardPerRisk / (rewardPerRisk + 1);
   const hist = historical ? historical.fitFor({ kind, priceCents }) : { score: null, rationale: 'Insufficient historical data' };
   const histScore = hist.score ?? 0.5;
 
-  const score = Math.round(1000 * (0.35 * confidence + 0.20 * efficiency + 0.30 * rr + 0.15 * histScore)) / 10;
+  // Favorites-first: market probability dominates; reward/risk, capital efficiency
+  // and history act as tiebreakers among comparable favorites.
+  const score = Math.round(1000 * (0.70 * confidence + 0.10 * rr + 0.05 * efficiency + 0.15 * histScore)) / 10;
 
   return {
     excluded: false,
@@ -160,7 +164,7 @@ export function buildPreGameReport(snapshot, board, { feeRate, historical } = {}
   const cashCents = snapshot.bankroll.currentCashCents;
 
   const evaluated = board.map((c) => evaluate(c, { targetCents, cashCents, feeRate, historical }));
-  const ranked = evaluated.filter((e) => !e.excluded).sort((a, b) => b.score - a.score || a.stakeForTargetCents - b.stakeForTargetCents);
+  const ranked = evaluated.filter((e) => !e.excluded).sort((a, b) => b.score - a.score || b.priceCents - a.priceCents);
   const excluded = evaluated.filter((e) => e.excluded);
 
   const medal = (i) => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`);
