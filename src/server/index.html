@@ -73,6 +73,9 @@
   .muted { color: var(--muted); }
   .medal { font-size: 16px; }
   .why { color: var(--muted); font-size: 12px; }
+  .pick-card { border-top: 1px solid var(--line); padding: 8px 10px; cursor: pointer; border-left: 3px solid transparent; border-radius: 4px; }
+  .pick-card:hover { background: #eef2f7; }
+  .pick-card.selected { background: #e8f1ff; border-left-color: var(--accent); }
   .err { color: var(--bad); font-size: 12px; min-height: 15px; margin-top: 6px; }
   .status-open { color: var(--warn); } .status-closed { color: var(--muted); } .status-settled { color: var(--good); }
   .summary { font-size: 14px; margin-bottom: 8px; }
@@ -373,14 +376,11 @@ function renderReplacements(r) {
 
 // ---- 👻 missed opportunities ----
 async function logSkipped() {
-  const checks = [...document.querySelectorAll('#pregameOut .pick-check:checked')];
-  if (!checks.length) { $('rankErr').textContent = 'Tick the picks you passed on first.'; return; }
+  const selected = getSelectedPicks();
+  if (!selected.length) { $('rankErr').textContent = 'Click the picks you passed on first.'; return; }
   $('rankErr').textContent = '';
-  const picks = checks.map((c) => {
-    const p = lastPregame && lastPregame.actionRanking[+c.dataset.i];
-    return p && { team: p.team, kind: p.kind, priceCents: p.priceCents, stakeForTargetCents: p.stakeForTargetCents, potentialProfitCents: p.potentialProfitCents };
-  }).filter(Boolean);
-  checks.forEach((c) => { c.checked = false; });
+  const picks = selected.map((p) => ({ team: p.team, kind: p.kind, priceCents: p.priceCents, stakeForTargetCents: p.stakeForTargetCents, potentialProfitCents: p.potentialProfitCents }));
+  clearPickSelection();
   renderMissed((await call('/api/missed/log', { picks })).missed);
 }
 function renderMissed(m) {
@@ -525,12 +525,44 @@ function stageRow(p) {
 function hideStagedIfEmpty() {
   if (!$('stagedBody').querySelector('tr')) $('stagedSection').style.display = 'none';
 }
+// ---- selecting picks by clicking cards ----
+function togglePick(el) { el.classList.toggle('selected'); }
+function getSelectedPicks() {
+  return [...document.querySelectorAll('#pregameOut .pick-card.selected')]
+    .map((c) => lastPregame && lastPregame.actionRanking[+c.dataset.i])
+    .filter(Boolean);
+}
+function clearPickSelection() {
+  document.querySelectorAll('#pregameOut .pick-card.selected').forEach((c) => c.classList.remove('selected'));
+}
+
 function stageSelected() {
-  const checks = [...document.querySelectorAll('#pregameOut .pick-check:checked')];
-  if (!checks.length) { $('rankErr').textContent = 'Tick one or more picks first.'; return; }
+  const picks = getSelectedPicks();
+  if (!picks.length) { $('rankErr').textContent = 'Click one or more picks first.'; return; }
   $('rankErr').textContent = '';
-  checks.forEach((c) => { const p = lastPregame && lastPregame.actionRanking[+c.dataset.i]; if (p) stageRow(p); c.checked = false; });
+  picks.forEach((p) => stageRow(p));
+  clearPickSelection();
   document.querySelector('.area.pre h2:nth-of-type(2)')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Open the selected picks immediately at their target stake — no staging step.
+async function openSelectedNow() {
+  const picks = getSelectedPicks();
+  if (!picks.length) { $('rankErr').textContent = 'Click the picks you want to open first.'; return; }
+  $('rankErr').textContent = '';
+  const unaffordable = picks.filter((p) => !p.affordable).length;
+  if (unaffordable && !confirm(`${unaffordable} selected pick(s) exceed your available cash. Open anyway?`)) return;
+  try {
+    for (const p of picks) {
+      await call('/api/open', {
+        team: p.team, opponent: p.opponent, ticker: p.ticker || p.team, kind: p.kind,
+        priceCents: p.priceCents, stakeDollars: p.stakeForTargetCents / 100,
+      });
+    }
+    clearPickSelection();
+    await refresh();
+    document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { $('rankErr').textContent = e.message; }
 }
 async function openRowFrom(tr) {
   await call('/api/open', {
@@ -589,15 +621,15 @@ function renderPreGame(pg) {
   }
   html += '</tbody></table>';
 
-  // action ranking narrative
-  html += '<div style="display:flex;align-items:center;gap:12px;margin:14px 0 6px">' +
+  // action ranking — clickable cards (click to select), then act on the selection
+  html += '<div style="display:flex;align-items:center;gap:8px;margin:14px 0 6px;flex-wrap:wrap">' +
     '<span style="font-weight:700">🎯 Action ranking</span>' +
-    '<button class="sm" onclick="stageSelected()">⬇ Add selected to Enter a position</button>' +
-    '<button class="sm ghost" onclick="logSkipped()">👻 Log selected as skipped</button></div>';
+    '<span class="muted" style="font-size:12px">click picks to select</span>' +
+    '<button class="sm" onclick="openSelectedNow()">⚡ Open selected now</button>' +
+    '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button>' +
+    '<button class="sm ghost" onclick="logSkipped()">👻 Log as skipped</button></div>';
   pg.actionRanking.forEach((it, i) => {
-    html += `<div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:10px;align-items:flex-start">
-      <input type="checkbox" class="pick-check" data-i="${i}" title="select" style="width:auto;margin-top:3px">
-      <div style="flex:1">
+    html += `<div class="pick-card" data-i="${i}" onclick="togglePick(this)">
         <div><span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         ${it.legs ? `<div class="muted" style="font-size:11px">combo legs: ${it.legs.map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}</div>` : ''}
@@ -605,7 +637,6 @@ function renderPreGame(pg) {
         <div class="why">📊 ${it.historicalFit}</div>
         ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}
         <div style="font-size:12px">→ ${it.action}</div>
-      </div>
     </div>`;
   });
   if (pg.excluded.length) html += '<div class="muted" style="margin-top:8px;font-size:12px"><b>Excluded:</b> ' +
