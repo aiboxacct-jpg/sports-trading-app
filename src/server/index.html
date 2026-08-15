@@ -743,20 +743,27 @@ function renderPreGame(pg) {
     Historical ${h.historicalActive ? '🧠 ' + h.historicalRecord + ' (' + h.historicalDecisions + ' decisions)' : '— none yet'} ·
     Target lock ${h.targetLock ? '🔒' : '🔓'}</div>`;
 
-  // quick board
-  html += '<table><thead><tr><th></th><th>Team</th><th>Kalshi</th><th>Mkt prob</th><th>Payout</th><th>Stake for target</th><th>Potential</th><th>% of cash</th></tr></thead><tbody>';
+  // single vs combo steer
+  if (h.singleVsCombo && h.singleVsCombo.verdict) {
+    html += `<div style="font-size:12px;margin-bottom:8px">🧭 <b>Single vs combo:</b> ${h.singleVsCombo.verdict}</div>`;
+  }
+
+  // quick board (edge/value first)
+  html += '<table><thead><tr><th></th><th>Team</th><th>Kalshi</th><th>Your&nbsp;%</th><th>Edge</th><th>EV</th><th>Payout</th><th>Stake</th><th>%cash</th></tr></thead><tbody>';
   for (const r of pg.quickBoard) {
     const label = r.kind === 'combo'
       ? `${r.team} <span class="muted">(combo: ${(r.legs || []).map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')})</span>`
       : `${r.team ?? ''}${r.opponent ? ' <span class="muted">vs ' + r.opponent + '</span>' : ''} <span class="muted">(single)</span>`;
+    const edgeCls = r.edgePct > 0 ? 'pos' : r.edgePct < 0 ? 'neg' : '';
     html += `<tr>
       <td class="medal">${r.medal}</td>
       <td>${label}</td>
-      <td>${r.priceCents}¢</td>
       <td>${r.marketProbabilityPct}%</td>
+      <td>${r.historicallyInformed ? r.estProbPct + '%' : '<span class="muted">—</span>'}</td>
+      <td class="${edgeCls}">${r.historicallyInformed ? (r.edgePct >= 0 ? '+' : '') + r.edgePct + '%' : '<span class="muted">n/a</span>'}</td>
+      <td class="${cls(r.evCents)}">${fmt(r.evCents)}</td>
       <td><b>${r.payoutMultiple}×</b></td>
       <td>${fmt(r.stakeForTargetCents)}${r.affordable ? '' : ' <span class="neg">⚠️</span>'}</td>
-      <td class="pos">+${fmt(r.potentialProfitCents)}</td>
       <td class="${r.capitalPct >= 50 ? 'neg' : ''}">${r.capitalPct == null ? '—' : r.capitalPct + '%'}</td></tr>`;
   }
   html += '</tbody></table>';

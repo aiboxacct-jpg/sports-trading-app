@@ -50,6 +50,38 @@ export class HistoricalDecisionEngine {
   }
 
   /**
+   * Single-vs-combo comparison from history, with a plain-English verdict to steer
+   * the user toward whichever has actually performed better (by avg realized profit).
+   */
+  kindSummary() {
+    const summarize = (kind) => {
+      const rows = this.decisions.filter((d) => d.kind === kind);
+      const n = rows.length;
+      const wins = rows.filter((d) => d.won).length;
+      const avgRealizedCents = n ? Math.round(rows.reduce((a, d) => a + d.realizedPureProfitCents, 0) / n) : 0;
+      return { n, wins, winRate: n ? wins / n : null, avgRealizedCents };
+    };
+    const single = summarize('single');
+    const combo = summarize('combo');
+
+    let verdict;
+    if (single.n < this.minSample && combo.n < this.minSample) {
+      verdict = 'Not enough history yet to compare singles vs combos.';
+    } else if (single.n < this.minSample) {
+      verdict = 'Not enough single history to compare with combos yet.';
+    } else if (combo.n < this.minSample) {
+      verdict = 'Not enough combo history to compare with singles yet.';
+    } else if (single.avgRealizedCents > combo.avgRealizedCents) {
+      verdict = `Favor singles — avg ${fmt(single.avgRealizedCents)} vs combos ${fmt(combo.avgRealizedCents)}.`;
+    } else if (combo.avgRealizedCents > single.avgRealizedCents) {
+      verdict = `Favor combos — avg ${fmt(combo.avgRealizedCents)} vs singles ${fmt(single.avgRealizedCents)}.`;
+    } else {
+      verdict = 'Singles and combos have performed about the same.';
+    }
+    return { single, combo, verdict };
+  }
+
+  /**
    * Historical fit for a candidate, matched by kind + price bucket.
    * Returns { score: 0..1 | null, sampleSize, rationale }.
    * score is null (neutral) when there isn't enough matching history.

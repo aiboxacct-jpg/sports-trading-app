@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { stakeForTarget, buildPreGameReport, addCombos } from '../src/report/preGameReport.js';
 import { SimEngine } from '../src/engine/simEngine.js';
+import { HistoricalDecisionEngine } from '../src/ranking/historicalDecisionEngine.js';
 
 test('stakeForTarget: the WIN actually clears the target, net of fees', () => {
   // Yankees @59¢, +$5 target. profit/contract = 41¢, ceil(500/41)=13 contracts.
@@ -86,6 +87,30 @@ test('game state flows through the report (used by the live game board)', () => 
   const board = [{ id: 'a', team: 'Cubs', opponent: 'Cardinals', priceCents: 58, gameState: 'Bot 5 · 2-1 CHC', status: 'open' }];
   const pg = buildPreGameReport(eng.snapshot(), board, {});
   assert.equal(pg.actionRanking[0].gameState, 'Bot 5 · 2-1 CHC');
+});
+
+test('edge-first: a bucket where you beat the market shows positive edge and EV', () => {
+  // Mid-price singles have won 5/6 (83%) historically — well above a 50¢ market's 50%.
+  const decisions = Array.from({ length: 6 }, (_, i) => ({ kind: 'single', entryPriceCents: 50, won: i < 5, realizedPureProfitCents: i < 5 ? 400 : -500 }));
+  const hist = new HistoricalDecisionEngine(decisions, { minSample: 3 });
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  const pg = buildPreGameReport(eng.snapshot(), [{ id: 'x', team: 'X', priceCents: 50, status: 'open' }], { historical: hist });
+  const it = pg.actionRanking[0];
+  assert.ok(it.historicallyInformed);
+  assert.ok(it.estProbPct > it.marketProbabilityPct); // your rate beats the market
+  assert.ok(it.edgePct > 0);
+  assert.ok(it.evCents > 0);                            // positive expected value from the edge
+});
+
+test('single-vs-combo verdict steers toward the more profitable kind', () => {
+  const decisions = [
+    ...Array.from({ length: 4 }, () => ({ kind: 'single', entryPriceCents: 50, won: true, realizedPureProfitCents: 400 })),
+    ...Array.from({ length: 4 }, () => ({ kind: 'combo', entryPriceCents: 30, won: false, realizedPureProfitCents: -500 })),
+  ];
+  const s = new HistoricalDecisionEngine(decisions, { minSample: 3 }).kindSummary();
+  assert.match(s.verdict, /Favor singles/);
+  assert.equal(s.single.n, 4);
+  assert.equal(s.combo.n, 4);
 });
 
 test('unaffordable target bet is flagged', () => {
