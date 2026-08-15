@@ -486,13 +486,16 @@ function toggleAutoLock() { autoLock = $('autoLockCb').checked; localStorage.set
 async function refresh() {
   try {
     const state = await call('/api/state');
-    // auto-lock winners at target, then re-render with the updated state
+    // auto-lock: when the COMBINED book can realize the target, close the minimal
+    // set of positions to secure it (one position or several together), then re-render
     if (autoLock) {
-      const t = state.snapshot.target.targetCents;
-      const hit = state.snapshot.positions.filter((p) => p.status === 'open' && p.unrealizedPureProfitCents != null && p.unrealizedPureProfitCents >= t);
-      if (hit.length) {
-        for (const p of hit) await call('/api/close', { id: p.id, exitPriceCents: p.currentPriceCents });
-        flashDecision(`🔒 Auto-locked ${hit.map((p) => p.team ?? p.ticker).join(', ')} at target`);
+      const gp = state.goalPath;
+      if (gp && gp.state === 'LOCK_AVAILABLE' && gp.lockPlan.length) {
+        for (const l of gp.lockPlan) {
+          const pos = state.snapshot.positions.find((p) => p.id === l.id && p.status === 'open');
+          if (pos && pos.currentPriceCents != null) await call('/api/close', { id: pos.id, exitPriceCents: pos.currentPriceCents });
+        }
+        flashDecision(`🔒 Auto-locked target: ${gp.lockPlan.map((l) => l.team).join(' + ')}`);
         return refresh();
       }
     }
