@@ -102,7 +102,7 @@
     start $<input id="startDollars" type="number" value="100" />
     target $<input id="targetDollars" type="number" value="5" />
     <button class="ghost sm" onclick="reset()">Reset</button>
-    <button class="sm" onclick="refresh()">🔄 Update</button>
+    <button class="sm" onclick="refresh()">🔄 Update (u)</button>
     <span id="updatedAt"></span>
   </div>
 </div>
@@ -431,9 +431,22 @@ async function refresh() {
     renderPostGame((await call('/api/postgame')).postgame);
     renderReplacements((await call('/api/replacements', { board: gatherBoard() })).replacements);
     renderMissed((await call('/api/missed')).missed);
-    $('updatedAt').textContent = 'updated ' + new Date().toLocaleTimeString();
+    const el = $('updatedAt');
+    el.textContent = 'updated ' + new Date().toLocaleTimeString();
+    // brief confirmation flash so the keyboard update feels responsive
+    el.style.transition = 'none'; el.style.color = 'var(--good)';
+    requestAnimationFrame(() => { el.style.transition = 'color .8s'; el.style.color = ''; });
   } catch (e) { $('liveErr').textContent = e.message; }
 }
+
+// Spec's Live Update: press "u" (or "r") to regenerate the live report immediately.
+// Preserves all session data — it only re-reads and re-renders. Ignored while typing.
+document.addEventListener('keydown', (e) => {
+  const el = document.activeElement;
+  const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'u' || e.key === 'U' || e.key === 'r' || e.key === 'R') { e.preventDefault(); refresh(); }
+});
 
 // ---- actions ----
 async function reset() {
