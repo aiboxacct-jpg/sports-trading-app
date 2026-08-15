@@ -47,6 +47,7 @@
     justify-content: center; color: #fff; font-size: 12px; font-weight: 800; }
   .area.pre .num { background: var(--accent); }
   .area.live .num { background: var(--warn); }
+  .area.livegame .num { background: var(--bad); }
   .area.post .num { background: var(--muted); }
   .area.missed .num { background: #7c3aed; }
   .area h2 .tag { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
@@ -150,9 +151,23 @@
     </div>
   </section>
 
-  <!-- ② LIVE -->
+  <!-- 🔴 LIVE GAME BOARD -->
+  <section class="area livegame">
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">3</span> Live Game Board — games in progress
+      <span class="tag">scan live games and jump in mid-game</span><span class="chev">▾</span></h2>
+    <div class="body">
+      <div class="row" style="margin-bottom:10px">
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="refreshLiveGames()">🔄 Refresh prices</button></div>
+      </div>
+      <div class="err" id="livegameErr"></div>
+      <div id="livegameOut"><p class="muted">Hit "Rank live games" to scan games in progress.</p></div>
+    </div>
+  </section>
+
+  <!-- ④ LIVE (your positions) -->
   <section class="area live">
-    <h2 class="collapser" onclick="toggle(this)"><span class="num">3</span> Live Data Update — in-game
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">4</span> Live Data Update — in-game
       <span class="tag">move the price / game state, hit Update, watch the target</span><span class="chev">▾</span></h2>
     <div class="body">
       <div id="goalPath"></div>
@@ -181,7 +196,7 @@
 
   <!-- ③ POST-GAME -->
   <section class="area post">
-    <h2 class="collapser" onclick="toggle(this)"><span class="num">4</span> Post-Game Analysis — settled &amp; closed
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">5</span> Post-Game Analysis — settled &amp; closed
       <span class="tag">what actually happened + the lesson</span><span class="chev">▾</span></h2>
     <div class="body">
       <div class="summary" id="pgSummary"></div>
@@ -191,7 +206,7 @@
 
   <!-- ⑤ MISSED OPPORTUNITIES -->
   <section class="area missed">
-    <h2 class="collapser" onclick="toggle(this)"><span class="num">5</span> Missed Opportunities — what we left on the table
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">6</span> Missed Opportunities — what we left on the table
       <span class="tag">skipped picks + how they turned out</span><span class="chev">▾</span></h2>
     <div class="body">
       <div class="summary" id="missedSummary"></div>
@@ -506,6 +521,39 @@ async function pregame() {
   } catch (e) { $('rankErr').textContent = e.message; }
 }
 
+// ---- 🔴 Live Game Board: scan in-progress games and jump in ----
+let lastLivegame = null;
+async function livegame() {
+  try { renderLiveGame((await call('/api/livegame', {})).livegame); }
+  catch (e) { $('livegameErr').textContent = e.message; }
+}
+async function refreshLiveGames() {
+  try { renderLiveGame((await call('/api/livegame/refresh', {})).livegame); }
+  catch (e) { $('livegameErr').textContent = e.message; }
+}
+function renderLiveGame(pg) {
+  lastLivegame = pg;
+  let html = '<div style="border:1px solid var(--line);border-left:4px solid var(--bad);border-radius:8px;padding:14px;background:#fff">';
+  html += '<div style="font-weight:800;margin-bottom:6px">🔴 LIVE GAME BOARD <span class="muted" style="font-weight:500">— ⚪ simulation; prices drift on refresh, game states illustrative</span></div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">' +
+    '<span class="muted" style="font-size:12px">click a game to select, then jump in</span>' +
+    '<button class="sm" onclick="openSelectedNow()">⚡ Open selected now</button>' +
+    '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button></div>';
+  if (!pg.actionRanking.length) html += '<p class="muted">No live games right now.</p>';
+  pg.actionRanking.forEach((it, i) => {
+    html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="togglePick(this)">
+        <div><span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
+          <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
+        ${it.gameState ? `<div style="font-size:12px;color:var(--bad)">🔴 ${it.gameState}</div>` : ''}
+        <div class="why">${it.why}</div>
+        ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}
+        <div style="font-size:12px">→ ${it.action}</div>
+    </div>`;
+  });
+  html += '</div>';
+  $('livegameOut').innerHTML = html;
+}
+
 // ---- staging: send selected ranked picks into "Enter a position" ----
 const esc = (v) => String(v ?? '').replace(/"/g, '&quot;');
 function stageRow(p) {
@@ -525,15 +573,16 @@ function stageRow(p) {
 function hideStagedIfEmpty() {
   if (!$('stagedBody').querySelector('tr')) $('stagedSection').style.display = 'none';
 }
-// ---- selecting picks by clicking cards ----
+// ---- selecting picks by clicking cards (works for both pre-game and live-game) ----
 function togglePick(el) { el.classList.toggle('selected'); }
 function getSelectedPicks() {
-  return [...document.querySelectorAll('#pregameOut .pick-card.selected')]
-    .map((c) => lastPregame && lastPregame.actionRanking[+c.dataset.i])
-    .filter(Boolean);
+  return [...document.querySelectorAll('.pick-card.selected')].map((c) => {
+    const report = c.dataset.src === 'live' ? lastLivegame : lastPregame;
+    return report && report.actionRanking[+c.dataset.i];
+  }).filter(Boolean);
 }
 function clearPickSelection() {
-  document.querySelectorAll('#pregameOut .pick-card.selected').forEach((c) => c.classList.remove('selected'));
+  document.querySelectorAll('.pick-card.selected').forEach((c) => c.classList.remove('selected'));
 }
 
 function stageSelected() {
@@ -557,6 +606,7 @@ async function openSelectedNow() {
       await call('/api/open', {
         team: p.team, opponent: p.opponent, ticker: p.ticker || p.team, kind: p.kind,
         priceCents: p.priceCents, stakeDollars: p.stakeForTargetCents / 100,
+        gameState: p.gameState || null,
       });
     }
     clearPickSelection();
@@ -629,7 +679,7 @@ function renderPreGame(pg) {
     '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button>' +
     '<button class="sm ghost" onclick="logSkipped()">👻 Log as skipped</button></div>';
   pg.actionRanking.forEach((it, i) => {
-    html += `<div class="pick-card" data-i="${i}" onclick="togglePick(this)">
+    html += `<div class="pick-card" data-src="pre" data-i="${i}" onclick="togglePick(this)">
         <div><span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         ${it.legs ? `<div class="muted" style="font-size:11px">combo legs: ${it.legs.map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}</div>` : ''}

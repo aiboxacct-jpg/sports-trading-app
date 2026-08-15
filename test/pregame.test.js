@@ -81,6 +81,13 @@ test('combo pricing, payout multiple, and stake-to-target are consistent', () =>
   assert.ok(combo.potentialProfitCents >= 500); // combo still sized to clear target
 });
 
+test('game state flows through the report (used by the live game board)', () => {
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  const board = [{ id: 'a', team: 'Cubs', opponent: 'Cardinals', priceCents: 58, gameState: 'Bot 5 · 2-1 CHC', status: 'open' }];
+  const pg = buildPreGameReport(eng.snapshot(), board, {});
+  assert.equal(pg.actionRanking[0].gameState, 'Bot 5 · 2-1 CHC');
+});
+
 test('unaffordable target bet is flagged', () => {
   const eng = new SimEngine({ startingBankrollCents: 500, targetCents: 500 }); // only $5 cash
   const board = [{ id: 'x', team: 'Pricey', priceCents: 64, status: 'open' }];

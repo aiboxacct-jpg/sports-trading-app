@@ -26,21 +26,43 @@ const STATE_FILE = process.env.STATE_FILE || join(__dirname, '../../data/sim-sta
 let engine;
 let simHistory;   // SIMULATION decision history — kept SEPARATE from any live history
 let missed;       // 👻 missed-opportunity ledger
+let liveBoard;    // 🔴 games "in progress" you can jump into (simulated; a live feed fills this later)
+
+// Simulated slate of in-progress games. Prices drift on refresh; game states are
+// illustrative until a real MLB feed is wired in.
+function defaultLiveBoard() {
+  return [
+    { id: 'lv-cubs', team: 'Cubs', opponent: 'Cardinals', ticker: 'LIVE-CUBS', priceCents: 58, gameState: 'Bot 5 · 2-1 CHC', status: 'open' },
+    { id: 'lv-mets', team: 'Mets', opponent: 'Phillies', ticker: 'LIVE-METS', priceCents: 47, gameState: 'Top 6 · 3-3', status: 'open' },
+    { id: 'lv-lad', team: 'Dodgers', opponent: 'Padres', ticker: 'LIVE-LAD', priceCents: 66, gameState: 'Bot 7 · 5-2 LAD', status: 'open' },
+    { id: 'lv-cle', team: 'Guardians', opponent: 'Tigers', ticker: 'LIVE-CLE', priceCents: 39, gameState: 'Top 4 · 1-0 DET', status: 'open' },
+    { id: 'lv-bal', team: 'Orioles', opponent: 'Rays', ticker: 'LIVE-BAL', priceCents: 52, gameState: 'Bot 3 · 0-0', status: 'open' },
+  ];
+}
 
 const saved = loadState(STATE_FILE);
 if (saved && saved.engine) {
   engine = SimEngine.fromState(saved.engine);
   simHistory = Array.isArray(saved.simHistory) ? saved.simHistory : [];
   missed = Array.isArray(saved.missed) ? saved.missed : [];
+  liveBoard = Array.isArray(saved.liveBoard) && saved.liveBoard.length ? saved.liveBoard : defaultLiveBoard();
   console.log(`↺ restored state: ${engine.positions.length} positions, ${simHistory.length} decisions, ${missed.length} missed`);
 } else {
   engine = newEngine({ startingDollars: 100, targetDollars: 5 });
   simHistory = [];
   missed = [];
+  liveBoard = defaultLiveBoard();
+}
+
+// Random-walk the live prices so the board feels live between refreshes.
+function driftLiveBoard() {
+  for (const g of liveBoard) {
+    g.priceCents = Math.max(1, Math.min(99, g.priceCents + Math.round((Math.random() * 2 - 1) * 4)));
+  }
 }
 
 function persist() {
-  saveState(STATE_FILE, { version: 1, engine: engine.toState(), simHistory, missed });
+  saveState(STATE_FILE, { version: 1, engine: engine.toState(), simHistory, missed, liveBoard });
 }
 
 // minSample: 3 so the profile activates after a few games in a price bucket.
@@ -182,6 +204,15 @@ const api = {
     return { pregame: buildPreGameReport(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
   },
 
+  'POST /api/livegame': () => ({
+    livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }),
+  }),
+
+  'POST /api/livegame/refresh': () => {
+    driftLiveBoard();
+    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+  },
+
   'POST /api/replacements': (body) => {
     const board = addCombos((body.board ?? []).map(resolveCandidate));
     return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
@@ -242,7 +273,7 @@ const api = {
 // Routes that change state and must be persisted after handling.
 const MUTATING = new Set([
   '/api/reset', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
-  '/api/missed/log', '/api/missed/resolve', '/api/missed/clear',
+  '/api/missed/log', '/api/missed/resolve', '/api/missed/clear', '/api/livegame/refresh',
 ]);
 
 // ---- request routing ------------------------------------------------------
