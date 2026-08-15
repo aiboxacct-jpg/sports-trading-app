@@ -277,9 +277,11 @@ function renderSnapshot(snap) {
 
 // ---- Your Decision menu (numbered, click or matches spec's 1/2/3 replies) ----
 let decisionActions = [];
+let lastReplacements = null;
 function renderDecisions(snap) {
   const open = snap.positions.filter((p) => p.status === 'open');
   const t = snap.target.targetCents;
+  const reps = (lastReplacements && lastReplacements.suggestions) || [];
   decisionActions = [];
   let html = '';
   const row = (n, label, hot) =>
@@ -293,6 +295,13 @@ function renderDecisions(snap) {
       decisionActions.push(() => closeAtPrice(p.id, price));
       html += row(decisionActions.length, `🔒 Lock ${p.team ?? p.ticker} target (+${fmt(p.unrealizedPureProfitCents)})`, true);
     }
+    // 🔄 one-click swap if Dynamic Replacement flagged a better leg for this position
+    const rep = reps.find((s) => s.positionId === p.id);
+    if (rep) {
+      decisionActions.push(() => doSwap(rep));
+      html += row(decisionActions.length,
+        `🔄 Swap ${rep.held.team} → ${rep.better.team} ${rep.better.priceCents}¢ (exit ${fmt(rep.exitRealizesCents)}, +${rep.scoreGain} better)`, true);
+    }
   });
   decisionActions.push(() => flashDecision('Waiting — monitoring the board'));
   html += row(decisionActions.length, 'Wait');
@@ -302,6 +311,19 @@ function renderDecisions(snap) {
   $('decisions').innerHTML = html;
 }
 function doDecision(n) { const a = decisionActions[n - 1]; if (a) a(); }
+// Exit the held leg at its current price, then enter the better one at target stake.
+async function doSwap(rep) {
+  try {
+    await call('/api/close', { id: rep.positionId, exitPriceCents: rep.held.priceCents });
+    await call('/api/open', {
+      team: rep.better.team, ticker: rep.better.team, kind: rep.better.kind,
+      priceCents: rep.better.priceCents, stakeDollars: rep.better.stakeForTargetCents / 100,
+    });
+    await refresh();
+    flashDecision(`Swapped ${rep.held.team} → ${rep.better.team}`);
+    document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { $('liveErr').textContent = e.message; }
+}
 function flashDecision(msg) {
   const el = $('decisionNote'); if (!el) return;
   el.textContent = msg;
@@ -441,10 +463,12 @@ function renderGoalPath(g) {
 async function refresh() {
   try {
     const state = await call('/api/state');
+    // fetch replacements first so the decision tree can offer one-click swaps
+    lastReplacements = (await call('/api/replacements', { board: gatherBoard() })).replacements;
     renderSnapshot(state.snapshot);
     renderGoalPath(state.goalPath);
+    renderReplacements(lastReplacements);
     renderPostGame((await call('/api/postgame')).postgame);
-    renderReplacements((await call('/api/replacements', { board: gatherBoard() })).replacements);
     renderMissed((await call('/api/missed')).missed);
     const el = $('updatedAt');
     el.textContent = 'updated ' + new Date().toLocaleTimeString();
