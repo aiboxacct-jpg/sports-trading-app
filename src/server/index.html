@@ -181,6 +181,12 @@
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <b style="font-size:12px">Simulate game:</b>
         <select id="sportSel" style="width:auto"><option value="MLB">MLB (9 innings)</option><option value="NHL">NHL (3 periods)</option></select>
+        <select id="speedSel" style="width:auto" title="play speed" onchange="setSpeed()">
+          <option value="2000">Fast · 2s</option>
+          <option value="3500" selected>Normal · 3.5s</option>
+          <option value="6000">Slow · 6s</option>
+          <option value="10000">Very slow · 10s</option>
+        </select>
         <button class="sm" id="playBtn" onclick="playPause()">▶ Play</button>
         <button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button>
         <button class="sm ghost" onclick="simulateToFinal()">🏁 Run to final</button>
@@ -394,8 +400,11 @@ function stopPlay() { if (playTimer) { clearInterval(playTimer); playTimer = nul
 function playPause() {
   if (playTimer) { stopPlay(); return; }
   $('playBtn').textContent = '⏸ Pause';
-  playTimer = setInterval(() => gameTick().catch(() => stopPlay()), 1400);
+  const ms = $('speedSel') ? +$('speedSel').value : 3500;
+  playTimer = setInterval(() => gameTick().catch(() => stopPlay()), ms);
 }
+// Change speed live: if playing, restart the interval at the new pace.
+function setSpeed() { if (playTimer) { stopPlay(); playPause(); } }
 async function simulateToFinal() {
   stopPlay();
   for (let i = 0; i < 500; i++) {
