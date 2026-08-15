@@ -180,12 +180,14 @@
 
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <b style="font-size:12px">Simulate game:</b>
+        <select id="sportSel" style="width:auto"><option value="MLB">MLB (9 innings)</option><option value="NHL">NHL (3 periods)</option></select>
         <button class="sm" id="playBtn" onclick="playPause()">▶ Play</button>
-        <button class="sm ghost" onclick="advanceOnce()">⏭ Advance one</button>
+        <button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button>
         <button class="sm ghost" onclick="simulateToFinal()">🏁 Run to final</button>
-        <span class="muted" style="font-size:12px">prices drift like a live market; games resolve on their own</span>
+        <b id="gameClock" style="font-size:13px;color:var(--bad)"></b>
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:auto"><input type="checkbox" id="autoLockCb" style="width:auto" onchange="toggleAutoLock()"> 🔒 Auto-lock at target</label>
       </div>
+      <div class="muted" style="font-size:12px;margin-top:2px">plays the full game clock; each step advances an inning/period and drifts prices</div>
 
       <div style="margin-top:12px">
         <div style="font-weight:700;font-size:12px;color:var(--muted)">Your decision <span style="font-weight:400">(click a number)</span></div>
@@ -350,23 +352,42 @@ async function closeAtPrice(id, priceCents) {
   catch (e) { $('liveErr').textContent = e.message; }
 }
 
-// ---- game simulation: unbiased random walk on each open price ----
-// With absorbing ends, a market starting at p wins ~p% of the time — so a 70¢
-// favorite really does win about 70% of games. Games resolve on their own.
+// ---- game simulation: play the FULL game, inning-by-inning (MLB) or period (NHL) ----
+// Each step advances the game clock and random-walks every open price. The game runs
+// its full regulation, then settles by a coin flip weighted by the final price (so a
+// 70¢ market wins ~70% of the time). Auto-lock can still bank the target mid-game.
 let playTimer = null;
+let gameStep = 0;
+const GAME_FORMATS = {
+  MLB: { totalSteps: 18, label: (s) => `${s % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(s / 2) + 1}` },
+  NHL: { totalSteps: 9,  label: (s) => `P${Math.floor(s / 3) + 1} ${['20:00', '13:20', '6:40'][s % 3]}` },
+};
+function currentSport() { const el = $('sportSel'); return (el && GAME_FORMATS[el.value]) ? el.value : 'MLB'; }
+function setGameClock(txt) { const el = $('gameClock'); if (el) el.textContent = txt ? `🕐 ${txt}` : ''; }
+
 async function gameTick() {
+  const fmtG = GAME_FORMATS[currentSport()];
   const snap = (await call('/api/state')).snapshot;
   const open = snap.positions.filter((p) => p.status === 'open');
-  if (!open.length) { stopPlay(); return false; }
+  if (!open.length) { gameStep = 0; setGameClock(''); stopPlay(); return false; }
+
+  gameStep += 1;
+  const atFinal = gameStep > fmtG.totalSteps;         // played full regulation -> settle
+  const clockTxt = atFinal ? 'Final' : fmtG.label(gameStep - 1);
   for (const p of open) {
     const cur = p.currentPriceCents ?? p.entryPriceCents;
-    let np = cur + Math.round((Math.random() * 2 - 1) * 5); // ±5¢ step, unbiased
-    if (np >= 97) { await call('/api/settle', { id: p.id, outcome: 'win' }); continue; }
-    if (np <= 3) { await call('/api/settle', { id: p.id, outcome: 'loss' }); continue; }
-    await call('/api/price', { ticker: p.ticker, priceCents: Math.max(1, Math.min(99, np)) });
+    const np = Math.max(1, Math.min(99, cur + Math.round((Math.random() * 2 - 1) * 5)));
+    await call('/api/price', { ticker: p.ticker, priceCents: np });
+    if (atFinal) {
+      await call('/api/settle', { id: p.id, outcome: Math.random() < np / 100 ? 'win' : 'loss' });
+    } else {
+      await call('/api/gamestate', { id: p.id, gameState: clockTxt });
+    }
   }
+  setGameClock(clockTxt);
+  if (atFinal) gameStep = 0;
   await refresh();
-  return true;
+  return !atFinal;
 }
 async function advanceOnce() { try { await gameTick(); } catch (e) { $('liveErr').textContent = e.message; } }
 function stopPlay() { if (playTimer) { clearInterval(playTimer); playTimer = null; } const b = $('playBtn'); if (b) b.textContent = '▶ Play'; }
@@ -377,10 +398,10 @@ function playPause() {
 }
 async function simulateToFinal() {
   stopPlay();
-  for (let i = 0; i < 400; i++) {
+  for (let i = 0; i < 500; i++) {
     const cont = await gameTick();
     if (!cont) break;
-    await new Promise((r) => setTimeout(r, 90));
+    await new Promise((r) => setTimeout(r, 120));
   }
 }
 
@@ -525,7 +546,7 @@ document.addEventListener('keydown', (e) => {
 
 // ---- actions ----
 async function reset() {
-  try { await call('/api/reset', { startingDollars: +$('startDollars').value, targetDollars: +$('targetDollars').value }); await refresh(); }
+  try { stopPlay(); gameStep = 0; setGameClock(''); await call('/api/reset', { startingDollars: +$('startDollars').value, targetDollars: +$('targetDollars').value }); await refresh(); }
   catch (e) { $('liveErr').textContent = e.message; }
 }
 async function openPos() {
