@@ -184,6 +184,7 @@
         <button class="sm ghost" onclick="advanceOnce()">⏭ Advance one</button>
         <button class="sm ghost" onclick="simulateToFinal()">🏁 Run to final</button>
         <span class="muted" style="font-size:12px">prices drift like a live market; games resolve on their own</span>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:auto"><input type="checkbox" id="autoLockCb" style="width:auto" onchange="toggleAutoLock()"> 🔒 Auto-lock at target</label>
       </div>
 
       <div style="margin-top:12px">
@@ -478,9 +479,23 @@ function renderGoalPath(g) {
   </div>`;
 }
 
+// Auto-lock: close any position whose unrealized pure profit has reached the target.
+let autoLock = localStorage.getItem('autoLock') !== 'false'; // default ON
+function toggleAutoLock() { autoLock = $('autoLockCb').checked; localStorage.setItem('autoLock', autoLock); if (autoLock) refresh(); }
+
 async function refresh() {
   try {
     const state = await call('/api/state');
+    // auto-lock winners at target, then re-render with the updated state
+    if (autoLock) {
+      const t = state.snapshot.target.targetCents;
+      const hit = state.snapshot.positions.filter((p) => p.status === 'open' && p.unrealizedPureProfitCents != null && p.unrealizedPureProfitCents >= t);
+      if (hit.length) {
+        for (const p of hit) await call('/api/close', { id: p.id, exitPriceCents: p.currentPriceCents });
+        flashDecision(`🔒 Auto-locked ${hit.map((p) => p.team ?? p.ticker).join(', ')} at target`);
+        return refresh();
+      }
+    }
     // fetch replacements first so the decision tree can offer one-click swaps
     lastReplacements = (await call('/api/replacements', { board: gatherBoard() })).replacements;
     renderSnapshot(state.snapshot);
@@ -771,6 +786,7 @@ function renderRanking(r) {
   $('rankOut').innerHTML = html;
 }
 
+$('autoLockCb').checked = autoLock;
 refresh();
 </script>
 </body>
