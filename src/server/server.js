@@ -158,6 +158,18 @@ const api = {
     return { snapshot: engine.snapshot() };
   },
 
+  // Full clean slate: new bankroll AND wipe decision history, missed ledger, live board.
+  'POST /api/clear': (body) => {
+    engine = newEngine({
+      startingDollars: body.startingDollars ?? 100,
+      targetDollars: body.targetDollars ?? 5,
+    });
+    simHistory.length = 0;
+    missed.length = 0;
+    liveBoard = defaultLiveBoard();
+    return { snapshot: engine.snapshot() };
+  },
+
   'POST /api/price': (body) => {
     engine.setPrice(String(body.ticker), int(body.priceCents));
     return { snapshot: engine.snapshot() };
@@ -272,7 +284,7 @@ const api = {
 
 // Routes that change state and must be persisted after handling.
 const MUTATING = new Set([
-  '/api/reset', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
+  '/api/reset', '/api/clear', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
   '/api/missed/log', '/api/missed/resolve', '/api/missed/clear', '/api/livegame/refresh',
 ]);
 

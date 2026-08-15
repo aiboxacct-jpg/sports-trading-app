@@ -106,6 +106,7 @@
     start $<input id="startDollars" type="number" value="100" />
     target $<input id="targetDollars" type="number" value="5" />
     <button class="ghost sm" onclick="reset()">Reset</button>
+    <button class="ghost sm" onclick="clearAll()">🧹 Clear all</button>
     <button class="sm" onclick="refresh()">🔄 Update (u)</button>
     <span id="updatedAt"></span>
   </div>
@@ -557,6 +558,15 @@ document.addEventListener('keydown', (e) => {
 async function reset() {
   try { stopPlay(); gameStep = 0; setGameClock(''); await call('/api/reset', { startingDollars: +$('startDollars').value, targetDollars: +$('targetDollars').value }); await refresh(); }
   catch (e) { $('liveErr').textContent = e.message; }
+}
+async function clearAll() {
+  if (!confirm('Start over? This wipes ALL history, the missed ledger, and open positions.')) return;
+  try {
+    stopPlay(); gameStep = 0; setGameClock('');
+    await call('/api/clear', { startingDollars: +$('startDollars').value, targetDollars: +$('targetDollars').value });
+    $('pregameOut').innerHTML = ''; $('rankOut').innerHTML = ''; $('livegameOut').innerHTML = '<p class="muted">Hit "Rank live games" to scan games in progress.</p>';
+    await refresh();
+  } catch (e) { $('liveErr').textContent = e.message; }
 }
 async function openPos() {
   try {
