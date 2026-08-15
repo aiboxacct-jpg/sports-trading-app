@@ -15,18 +15,53 @@ import { sessionPostGame } from '../report/postGameReport.js';
 import { buildPreGameReport, addCombos } from '../report/preGameReport.js';
 import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js';
 import { findReplacements } from '../ranking/dynamicReplacement.js';
+import { loadState, saveState } from '../data/store.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
+const STATE_FILE = process.env.STATE_FILE || join(__dirname, '../../data/sim-state.json');
 
-// ---- the one simulated engine this server drives --------------------------
-let engine = newEngine({ startingDollars: 100, targetDollars: 5 });
+// ---- state: loaded from disk on boot, saved after every change ------------
+let engine;
+let simHistory;   // SIMULATION decision history — kept SEPARATE from any live history
+let missed;       // 👻 missed-opportunity ledger
 
-// SIMULATION decision history — accumulates across resets so the engine can learn
-// across games, but is kept SEPARATE from any (future) live history. minSample: 3
-// so the profile activates after a few games in a price bucket.
-const simHistory = [];
+const saved = loadState(STATE_FILE);
+if (saved && saved.engine) {
+  engine = SimEngine.fromState(saved.engine);
+  simHistory = Array.isArray(saved.simHistory) ? saved.simHistory : [];
+  missed = Array.isArray(saved.missed) ? saved.missed : [];
+  console.log(`↺ restored state: ${engine.positions.length} positions, ${simHistory.length} decisions, ${missed.length} missed`);
+} else {
+  engine = newEngine({ startingDollars: 100, targetDollars: 5 });
+  simHistory = [];
+  missed = [];
+}
+
+function persist() {
+  saveState(STATE_FILE, { version: 1, engine: engine.toState(), simHistory, missed });
+}
+
+// minSample: 3 so the profile activates after a few games in a price bucket.
 const historicalEngine = () => new HistoricalDecisionEngine(simHistory, { minSample: 3 });
+
+// 👻 Missed-opportunity ledger: picks you were shown but skipped.
+// regret = profit left on the table by skipped WINS; dodged = stake spared on skipped LOSSES.
+function missedSummary() {
+  const won = missed.filter((m) => m.status === 'won');
+  const lost = missed.filter((m) => m.status === 'lost');
+  const regretCents = won.reduce((a, m) => a + (m.potentialProfitCents || 0), 0);
+  const dodgedCents = lost.reduce((a, m) => a + (m.stakeForTargetCents || 0), 0);
+  return {
+    items: missed,
+    pending: missed.filter((m) => m.status === 'pending').length,
+    won: won.length,
+    lost: lost.length,
+    regretCents,
+    dodgedCents,
+    netCents: regretCents - dodgedCents, // >0 means skipping cost you overall
+  };
+}
 function recordDecision(pos) {
   if (!pos) return;
   simHistory.push({
@@ -148,6 +183,41 @@ const api = {
     return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
   },
 
+  'GET /api/missed': () => ({ missed: missedSummary() }),
+
+  'POST /api/missed/log': (body) => {
+    const pendingTeams = new Set(missed.filter((m) => m.status === 'pending').map((m) => m.team));
+    for (const p of body.picks ?? []) {
+      if (!p || !p.team || pendingTeams.has(p.team)) continue; // dedup pending by team
+      missed.push({
+        id: `miss-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        team: String(p.team),
+        kind: p.kind === 'combo' ? 'combo' : 'single',
+        priceCents: p.priceCents == null ? null : int(p.priceCents),
+        stakeForTargetCents: Number(p.stakeForTargetCents) || 0,
+        potentialProfitCents: Number(p.potentialProfitCents) || 0,
+        loggedAt: new Date().toISOString(),
+        status: 'pending',
+        resolvedAt: null,
+      });
+      pendingTeams.add(p.team);
+    }
+    return { missed: missedSummary() };
+  },
+
+  'POST /api/missed/resolve': (body) => {
+    const m = missed.find((x) => x.id === String(body.id));
+    if (!m) throw new Error(`no missed item ${body.id}`);
+    m.status = body.outcome === 'win' ? 'won' : 'lost';
+    m.resolvedAt = new Date().toISOString();
+    return { missed: missedSummary() };
+  },
+
+  'POST /api/missed/clear': () => {
+    missed.length = 0;
+    return { missed: missedSummary() };
+  },
+
   'POST /api/rank': (body) => {
     const stakeCents = toCents(Number(body.stakeDollars ?? 10));
     const board = (body.board ?? []).map((c, i) => ({
@@ -164,6 +234,12 @@ const api = {
     return { ranking: result, stakeCents };
   },
 };
+
+// Routes that change state and must be persisted after handling.
+const MUTATING = new Set([
+  '/api/reset', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
+  '/api/missed/log', '/api/missed/resolve', '/api/missed/clear',
+]);
 
 // ---- request routing ------------------------------------------------------
 const server = createServer(async (req, res) => {
@@ -188,6 +264,7 @@ const server = createServer(async (req, res) => {
 
     const body = req.method === 'POST' ? await readBody(req) : {};
     const result = handler(body);
+    if (MUTATING.has(url.pathname)) persist();
     return sendJson(res, 200, { ok: true, ...result });
   } catch (err) {
     return sendJson(res, 400, { ok: false, error: err.message });

@@ -23,9 +23,12 @@ Eight pillars carry that, with their current build status:
 | 🔒 **Goal-Lock Hedging / Dynamic Completion** | Can we shore up a position? | 🟡 Partial — lock-by-exit + LOCKED state; no hedge suggestions yet |
 | 🚨 **Position Monitor** | Should we review / exit? | ✅ Built (mostly) — live P/P, target alerts, Hold/Lock/Wait; no downside stop yet |
 | 🛡️ **Risk Engine** | Don't chase. | 🟡 Partial — concentration + affordability warnings; no enforced limits |
-| 📊 **Paper-Trading Ledger** | Record everything. | 🟡 Partial — full per-position record; NOT yet persistent across restarts |
-| 👻 **Missed Opportunity Tracker** | What did we leave on the table? | 🗺️ Planned — not started |
+| 📊 **Paper-Trading Ledger** | Record everything. | ✅ Built — full per-position record, persisted to disk and restored on restart |
+| 👻 **Missed Opportunity Tracker** | What did we leave on the table? | ✅ Built — logs skipped picks, resolves outcomes (regret vs dodged) |
 | 📈 **Learning Engine** | What actually works over time? | ✅ Built (mostly) — win-rate by kind + price bucket, fed into ranking |
+
+Remaining partial pillars: hedging is lock-by-exit only (no hedge suggestions yet),
+and the risk engine warns on concentration but doesn't enforce hard limits.
 
 Always separate PREDICTION from DECISION from PROFIT from REALIZED PROFIT.
 

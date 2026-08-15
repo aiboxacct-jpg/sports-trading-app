@@ -48,6 +48,7 @@
   .area.pre .num { background: var(--accent); }
   .area.live .num { background: var(--warn); }
   .area.post .num { background: var(--muted); }
+  .area.missed .num { background: #7c3aed; }
   .area h2 .tag { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
   .collapser { cursor: pointer; user-select: none; }
   .chev { margin-left: auto; color: var(--muted); font-size: 12px; transition: transform .15s; display: inline-block; }
@@ -181,6 +182,17 @@
     <div class="body">
       <div class="summary" id="pgSummary"></div>
       <div id="pgOut"><p class="muted">Nothing settled yet.</p></div>
+    </div>
+  </section>
+
+  <!-- ⑤ MISSED OPPORTUNITIES -->
+  <section class="area missed">
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">5</span> Missed Opportunities — what we left on the table
+      <span class="tag">skipped picks + how they turned out</span><span class="chev">▾</span></h2>
+    <div class="body">
+      <div class="summary" id="missedSummary"></div>
+      <div id="missedOut"><p class="muted">No skipped picks logged yet. In the Pre-Game report, tick picks you're passing on and hit "👻 Log selected as skipped".</p></div>
+      <button class="sm ghost" style="margin-top:8px" onclick="clearMissed()">Clear all</button>
     </div>
   </section>
 </main>
@@ -356,11 +368,50 @@ function renderReplacements(r) {
   el.innerHTML = html;
 }
 
+// ---- 👻 missed opportunities ----
+async function logSkipped() {
+  const checks = [...document.querySelectorAll('#pregameOut .pick-check:checked')];
+  if (!checks.length) { $('rankErr').textContent = 'Tick the picks you passed on first.'; return; }
+  $('rankErr').textContent = '';
+  const picks = checks.map((c) => {
+    const p = lastPregame && lastPregame.actionRanking[+c.dataset.i];
+    return p && { team: p.team, kind: p.kind, priceCents: p.priceCents, stakeForTargetCents: p.stakeForTargetCents, potentialProfitCents: p.potentialProfitCents };
+  }).filter(Boolean);
+  checks.forEach((c) => { c.checked = false; });
+  renderMissed((await call('/api/missed/log', { picks })).missed);
+}
+function renderMissed(m) {
+  if (!m) return;
+  const el = $('missedOut'), sum = $('missedSummary');
+  if (!m.items.length) { sum.textContent = ''; el.innerHTML = '<p class="muted">No skipped picks logged yet.</p>'; return; }
+  sum.innerHTML = `Left on the table (skipped wins): <b class="neg">${fmt(m.regretCents)}</b> · ` +
+    `dodged (skipped losses): <b class="pos">${fmt(m.dodgedCents)}</b> · ` +
+    `net regret: <b class="${m.netCents > 0 ? 'neg' : 'pos'}">${fmt(m.netCents)}</b> · ${m.pending} pending`;
+  let html = '<table><thead><tr><th>Team</th><th>Kind</th><th>Price</th><th>Would-win</th><th>Outcome</th><th>Resolve</th></tr></thead><tbody>';
+  for (const it of m.items) {
+    const status = it.status === 'won' ? '<span class="neg">WON — missed it</span>'
+      : it.status === 'lost' ? '<span class="pos">LOST — dodged it</span>'
+      : '<span class="muted">pending</span>';
+    const actions = it.status === 'pending'
+      ? `<button class="sm ghost" onclick="rollMissed('${it.id}',${it.priceCents})">🎲 Roll</button>
+         <button class="sm ghost" onclick="resolveMissed('${it.id}','win')">Won</button>
+         <button class="sm ghost" onclick="resolveMissed('${it.id}','loss')">Lost</button>`
+      : '<span class="muted">—</span>';
+    html += `<tr><td>${it.team}</td><td>${it.kind}</td><td>${it.priceCents ?? '—'}¢</td><td class="pos">+${fmt(it.potentialProfitCents)}</td><td>${status}</td><td>${actions}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+async function resolveMissed(id, outcome) { renderMissed((await call('/api/missed/resolve', { id, outcome })).missed); }
+function rollMissed(id, priceCents) { resolveMissed(id, Math.random() < (priceCents / 100) ? 'win' : 'loss'); }
+async function clearMissed() { renderMissed((await call('/api/missed/clear', {})).missed); }
+
 async function refresh() {
   try {
     renderSnapshot((await call('/api/state')).snapshot);
     renderPostGame((await call('/api/postgame')).postgame);
     renderReplacements((await call('/api/replacements', { board: gatherBoard() })).replacements);
+    renderMissed((await call('/api/missed')).missed);
     $('updatedAt').textContent = 'updated ' + new Date().toLocaleTimeString();
   } catch (e) { $('liveErr').textContent = e.message; }
 }
@@ -509,7 +560,8 @@ function renderPreGame(pg) {
   // action ranking narrative
   html += '<div style="display:flex;align-items:center;gap:12px;margin:14px 0 6px">' +
     '<span style="font-weight:700">🎯 Action ranking</span>' +
-    '<button class="sm" onclick="stageSelected()">⬇ Add selected to Enter a position</button></div>';
+    '<button class="sm" onclick="stageSelected()">⬇ Add selected to Enter a position</button>' +
+    '<button class="sm ghost" onclick="logSkipped()">👻 Log selected as skipped</button></div>';
   pg.actionRanking.forEach((it, i) => {
     html += `<div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:10px;align-items:flex-start">
       <input type="checkbox" class="pick-check" data-i="${i}" title="select" style="width:auto;margin-top:3px">

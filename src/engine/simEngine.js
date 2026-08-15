@@ -27,6 +27,33 @@ export class SimEngine {
     this._seq = 0;
   }
 
+  /** Serialize the full engine state to a plain object (for persistence). */
+  toState() {
+    return {
+      startingBankrollCents: this.startingBankrollCents,
+      targetCents: this.targetCents,
+      feeRate: this.feeRate ?? null,
+      seq: this._seq,
+      positions: this.positions,
+      prices: this.market?.prices instanceof Map ? Object.fromEntries(this.market.prices) : {},
+    };
+  }
+
+  /** Rebuild an engine from a persisted state object. */
+  static fromState(s) {
+    const eng = new SimEngine({
+      startingBankrollCents: s.startingBankrollCents,
+      targetCents: s.targetCents,
+      feeRate: s.feeRate ?? undefined,
+    });
+    eng._seq = s.seq ?? 0;
+    eng.positions = Array.isArray(s.positions) ? s.positions : [];
+    for (const [ticker, cents] of Object.entries(s.prices ?? {})) {
+      try { eng.market.setPrice(ticker, cents); } catch { /* skip invalid saved price */ }
+    }
+    return eng;
+  }
+
   /** Set a hypothetical market price (cents). Chainable. */
   setPrice(ticker, priceCents) {
     this.market.setPrice(ticker, priceCents);
