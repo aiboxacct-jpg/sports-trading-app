@@ -54,15 +54,23 @@ export class SimEngine {
     return eng;
   }
 
-  /** Set a hypothetical market price (cents). Chainable. */
+  /** Set a hypothetical market price (cents). Records the point on any open position holding this ticker. */
   setPrice(ticker, priceCents) {
     this.market.setPrice(ticker, priceCents);
+    for (const p of this.positions) {
+      if (p.status === 'open' && p.ticker === ticker) {
+        p.priceJourney.push({ priceCents, label: p.currentGameState ?? null });
+        if (p.priceJourney.length > 200) p.priceJourney.shift();
+      }
+    }
     return this;
   }
 
-  /** Update the live game state for a position (inning/score/etc.). */
+  /** Update the live game state for a position; labels the latest price point. */
   setGameState(id, gameState) {
-    this._require(id).currentGameState = gameState;
+    const p = this._require(id);
+    p.currentGameState = gameState;
+    if (p.priceJourney.length) p.priceJourney[p.priceJourney.length - 1].label = gameState;
     return this;
   }
 
@@ -93,6 +101,7 @@ export class SimEngine {
     p.exitTs = exitTs;
     p.exitFeeCents = v.exitFeeCents;
     p.realizedPureProfitCents = v.unrealizedPureProfitCents;
+    p.priceJourney.push({ priceCents: exitPriceCents, label: 'Exit' });
     return p;
   }
 
@@ -106,6 +115,7 @@ export class SimEngine {
     p.exitTs = exitTs;
     p.exitFeeCents = 0;
     p.realizedPureProfitCents = r.realizedPureProfitCents;
+    p.priceJourney.push({ priceCents: outcome === 'win' ? 100 : 0, label: outcome === 'win' ? 'Final W' : 'Final L' });
     return p;
   }
 

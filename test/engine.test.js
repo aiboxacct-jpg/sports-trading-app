@@ -72,6 +72,28 @@ test('closing to bank the profit moves target to REALIZED', () => {
   assert.ok(s.bankroll.realizedPureProfitCents >= 500);
 });
 
+test('price journey records entry, each move, and the exit', () => {
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  eng.setPrice('T', 50);
+  const p = eng.open({ ticker: 'T', team: 'A', entryPriceCents: 50, contracts: 10, gameStateAtEntry: 'Top 1' });
+  eng.setPrice('T', 55);
+  eng.setPrice('T', 60);
+  eng.close(p.id, 62);
+  const j = eng.positions[0].priceJourney;
+  assert.deepEqual(j.map((x) => x.priceCents), [50, 55, 60, 62]);
+  assert.equal(j.at(-1).label, 'Exit');
+});
+
+test('settle appends a final 100 (win) or 0 (loss) point', () => {
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  eng.setPrice('T', 40);
+  const p = eng.open({ ticker: 'T', team: 'A', entryPriceCents: 40, contracts: 10 });
+  eng.setPrice('T', 45);
+  eng.settle(p.id, 'win');
+  assert.equal(eng.positions[0].priceJourney.at(-1).priceCents, 100);
+  assert.equal(eng.positions[0].priceJourney.at(-1).label, 'Final W');
+});
+
 test('KalshiMarketProvider returns null (NOT VERIFIED) while unconfigured', () => {
   const k = new KalshiMarketProvider({ apiKeyId: null, privateKeyPem: null });
   assert.equal(k.isConfigured, false);

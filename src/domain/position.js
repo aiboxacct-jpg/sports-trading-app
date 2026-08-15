@@ -64,6 +64,8 @@ export function openPosition({
     exitFeeCents: 0,
     settlement: null,             // 'win' | 'loss' when settled
     realizedPureProfitCents: 0,
+    // price-over-time for the post-game journey graph; starts at the entry price
+    priceJourney: [{ priceCents: entryPriceCents, label: gameStateAtEntry ?? 'Entry' }],
   };
 }
 
