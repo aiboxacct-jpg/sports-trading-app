@@ -20,15 +20,16 @@ Eight pillars carry that, with their current build status:
 |--------|---------|--------|
 | 🎯 **Goal-Seeking Engine** | What's the best path to the target? | ✅ Built — every pick (single & combo) sized to the target; ranked paths |
 | 🔄 **Dynamic Replacement** | Is there a better leg now? | ✅ Built — scores open positions vs. the live board on each update |
-| 🔒 **Goal-Lock Hedging / Dynamic Completion** | Can we shore up a position? | 🟡 Partial — lock-by-exit + LOCKED state; no hedge suggestions yet |
+| 🔒 **Goal-Lock / Dynamic Completion** | Lock in the target. | ✅ Built — auto-lock at target (single position or combined book, minimal exits) + manual Lock; LOCKED state tracked. (Opposite-side hedging is a future option) |
 | 🚨 **Position Monitor** | Should we review / exit? | ✅ Built (mostly) — live P/P, target alerts, Hold/Lock/Wait; no downside stop yet |
 | 🛡️ **Risk Engine** | Don't chase. | 🟡 Partial — concentration + affordability warnings; no enforced limits |
 | 📊 **Paper-Trading Ledger** | Record everything. | ✅ Built — full per-position record, persisted to disk and restored on restart |
 | 👻 **Missed Opportunity Tracker** | What did we leave on the table? | ✅ Built — logs skipped picks, resolves outcomes (regret vs dodged) |
 | 📈 **Learning Engine** | What actually works over time? | ✅ Built (mostly) — win-rate by kind + price bucket, fed into ranking |
 
-Remaining partial pillars: hedging is lock-by-exit only (no hedge suggestions yet),
-and the risk engine warns on concentration but doesn't enforce hard limits.
+Remaining partial pillar: the risk engine warns on concentration but doesn't yet
+enforce hard limits. (Optional future: proactive opposite-side hedging to lock the
+target while still holding.)
 
 Always separate PREDICTION from DECISION from PROFIT from REALIZED PROFIT.
 
@@ -111,6 +112,10 @@ position to secure the target: 🚨🎯 TARGET ACHIEVED.
 
 Do not confuse unrealized profit with realized profit. Never claim the target was
 achieved simply because a team is winning.
+
+Auto-lock (toggleable, default on): when the combined realizable profit reaches the
+target, the app automatically closes the minimal set of positions to bank it — one
+position alone, or several together.
 
 ## Live Data Report Format
 Every Live Data Report should contain: 1) Header, 2) Bankroll, 3) Target, 4) Current

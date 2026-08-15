@@ -76,7 +76,7 @@
       <tbody>
         <tr><td>🎯 Goal-Seeking Engine</td><td>Best path to the target?</td><td><span class="chip built">✅ BUILT</span></td></tr>
         <tr><td>🔄 Dynamic Replacement</td><td>Is there a better leg now?</td><td><span class="chip built">✅ BUILT</span></td></tr>
-        <tr><td>🔒 Goal-Lock Hedging / Dynamic Completion</td><td>Can we shore up a position?</td><td><span class="chip stub">🟡 PARTIAL</span></td></tr>
+        <tr><td>🔒 Goal-Lock / Dynamic Completion</td><td>Lock in the target.</td><td><span class="chip built">✅ BUILT</span></td></tr>
         <tr><td>🚨 Position Monitor</td><td>Should we review / exit?</td><td><span class="chip built">✅ BUILT</span></td></tr>
         <tr><td>🛡️ Risk Engine</td><td>Don't chase.</td><td><span class="chip stub">🟡 PARTIAL</span></td></tr>
         <tr><td>📊 Paper-Trading Ledger</td><td>Record everything.</td><td><span class="chip built">✅ BUILT</span></td></tr>
@@ -84,9 +84,9 @@
         <tr><td>📈 Learning Engine</td><td>What actually works over time?</td><td><span class="chip built">✅ BUILT</span></td></tr>
       </tbody>
     </table>
-    <div class="callout">Remaining partial pillars: hedging is lock-by-exit only (no
-      hedge suggestions yet), and the risk engine warns on concentration but doesn't
-      enforce hard limits.</div>
+    <div class="callout">Remaining partial pillar: the risk engine warns on concentration
+      but doesn't yet enforce hard limits. Optional future add: proactive opposite-side
+      hedging to lock the target while still holding a position.</div>
   </section>
 
   <section>
@@ -167,6 +167,9 @@
     </ul>
     <div class="callout">Never confuse unrealized with realized profit. A winning team is
       <b>not</b> a realized target.</div>
+    <p><b>Auto-lock</b> (toggleable, default on): when the combined realizable profit reaches
+      the target, the app automatically closes the minimal set of positions to bank it —
+      one position alone, or several together.</p>
   </section>
 
   <section>
