@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sports Trading App — Simulation</title>
+<style>
+  :root {
+    --bg: #ffffff; --panel: #f6f7f9; --line: #d8dee6; --ink: #1a1f26;
+    --muted: #5c6773; --accent: #2563eb; --good: #1a7f37; --bad: #d1242f; --warn: #9a6700;
+    --field: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px; background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; }
+  header .badge { font-size: 11px; color: var(--warn); border: 1px solid var(--warn);
+    padding: 1px 7px; border-radius: 99px; letter-spacing: .04em; }
+  header a { margin-left: auto; color: var(--accent); text-decoration: none; font-weight: 600; font-size: 14px; }
+
+  /* pinned status strip */
+  .strip { position: sticky; top: 0; z-index: 5; background: #fff;
+    border-bottom: 2px solid var(--line); padding: 10px 20px;
+    display: flex; gap: 22px; align-items: center; flex-wrap: wrap; box-shadow: 0 2px 6px rgba(0,0,0,.04); }
+  .kpis { display: flex; gap: 18px; }
+  .kpis small { color: var(--muted); font-size: 11px; display: block; }
+  .kpis b { font-size: 17px; }
+  .targetbox { border-left: 1px solid var(--line); padding-left: 18px; min-width: 210px; }
+  .targetbox small { color: var(--muted); font-size: 11px; }
+  .targetbox .state { font-weight: 800; font-size: 15px; }
+  .state.NOTREACHED { color: var(--muted); }
+  .state.AVAILABLE { color: var(--warn); }
+  .state.LOCKED { color: var(--accent); }
+  .state.REALIZED { color: var(--good); }
+  .alert { color: var(--bad); font-weight: 800; font-size: 13px; min-height: 15px; }
+  .setup { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  .setup input { width: 58px; }
+
+  /* areas */
+  main { padding: 6px 20px 80px; }
+  .area { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px; margin: 14px 0; }
+  .area > h2 { display: flex; align-items: center; gap: 10px; font-size: 14px; margin: 0 0 12px;
+    text-transform: uppercase; letter-spacing: .04em; }
+  .num { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; align-items: center;
+    justify-content: center; color: #fff; font-size: 12px; font-weight: 800; }
+  .area.pre .num { background: var(--accent); }
+  .area.live .num { background: var(--warn); }
+  .area.post .num { background: var(--muted); }
+  .area h2 .tag { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  .collapser { cursor: pointer; user-select: none; }
+  .chev { margin-left: auto; color: var(--muted); font-size: 12px; transition: transform .15s; display: inline-block; }
+  .collapser.collapsed .chev { transform: rotate(-90deg); }
+  .body.hidden { display: none; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
+  input, select { background: var(--field); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 8px; width: 100%; font: inherit; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+  .row > div { flex: 1; min-width: 84px; }
+  button { background: #fff; color: var(--bad); border: 1px solid var(--bad); border-radius: 6px;
+    padding: 7px 12px; font-weight: 600; cursor: pointer; font: inherit; }
+  button:hover { background: #fff5f5; }
+  button.ghost { color: var(--ink); border-color: var(--line); font-weight: 500; }
+  button.ghost:hover { background: #eef1f5; }
+  button.sm { padding: 4px 8px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .pos { color: var(--good); } .neg { color: var(--bad); }
+  .muted { color: var(--muted); }
+  .medal { font-size: 16px; }
+  .why { color: var(--muted); font-size: 12px; }
+  .err { color: var(--bad); font-size: 12px; min-height: 15px; margin-top: 6px; }
+  .status-open { color: var(--warn); } .status-closed { color: var(--muted); } .status-settled { color: var(--good); }
+  .summary { font-size: 14px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sports Trading App</h1>
+  <span class="badge">⚪ SIMULATION</span>
+  <a href="/spec">📋 Spec</a>
+</header>
+
+<!-- PINNED STATE — always in front of you -->
+<div class="strip">
+  <div class="kpis">
+    <div><small>Cash</small><b id="cash">—</b></div>
+    <div><small>Committed</small><b id="committed">—</b></div>
+    <div><small>Unrealized P/P</small><b id="unreal">—</b></div>
+    <div><small>Realized P/P</small><b id="real">—</b></div>
+  </div>
+  <div class="targetbox">
+    <small>Target <span id="targetAmt"></span></small>
+    <div class="state" id="targetState">—</div>
+    <div class="alert" id="targetAlert"></div>
+  </div>
+  <div class="setup">
+    start $<input id="startDollars" type="number" value="100" />
+    target $<input id="targetDollars" type="number" value="5" />
+    <button class="ghost sm" onclick="reset()">Reset</button>
+    <button class="sm" onclick="refresh()">🔄 Update</button>
+    <span id="updatedAt"></span>
+  </div>
+</div>
+
+<main>
+  <!-- ① PRE-GAME -->
+  <section class="area pre">
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">1</span> Pre-Game — Action Ranking (hypothetical board)
+      <span class="tag">scan the whole board, then enter a pick</span><span class="chev">▾</span></h2>
+    <div class="body">
+      <div id="pregameOut"></div>
+      <div class="row" style="margin-bottom:10px">
+        <div style="flex:0 0 auto"><label>Stake each ($)</label><input id="rStake" type="number" value="10" style="width:100px" /></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="rank()">Quick rank</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="pregame()">📋 Pre-Game Report</button></div>
+      </div>
+      <div class="err" id="rankErr"></div>
+      <div id="rankOut"></div>
+    </div>
+
+    <h2 class="collapser" style="margin-top:18px" onclick="toggle(this)"><span class="num">2</span> Enter a position<span class="chev">▾</span></h2>
+    <div class="body">
+      <div class="row">
+        <div><label>Team</label><input id="oTeam" placeholder="Giants" /></div>
+        <div><label>Opponent</label><input id="oOpp" placeholder="Dodgers" /></div>
+        <div><label>Ticker</label><input id="oTicker" placeholder="MLB-GIANTS" /></div>
+        <div><label>Kind</label><select id="oKind"><option>single</option><option>combo</option></select></div>
+        <div><label>Entry (¢)</label><input id="oPrice" type="number" value="55" min="1" max="99" /></div>
+        <div><label>Stake ($)</label><input id="oStake" type="number" value="10" /></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="openPos()">Open</button></div>
+      </div>
+      <div class="err" id="openErr"></div>
+
+      <div id="stagedSection" style="margin-top:16px;display:none">
+        <div style="font-weight:700;font-size:12px;color:var(--muted);margin-bottom:6px">Staged picks — edit stake if needed, then Open</div>
+        <table>
+          <thead><tr><th>Team</th><th>Opponent</th><th>Ticker</th><th>Kind</th><th>Entry (¢)</th><th>Stake ($)</th><th></th></tr></thead>
+          <tbody id="stagedBody"></tbody>
+        </table>
+        <button class="sm" style="margin-top:8px" onclick="openAllStaged()">Open all staged</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ② LIVE -->
+  <section class="area live">
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">3</span> Live Data Update — in-game
+      <span class="tag">move the price / game state, hit Update, watch the target</span><span class="chev">▾</span></h2>
+    <div class="body">
+      <table>
+        <thead><tr><th>Position</th><th>Entry</th><th>Game state</th><th>Now (¢)</th><th>Value</th><th>Unrealized P/P</th><th>Actions</th></tr></thead>
+        <tbody id="posBody"><tr><td colspan="7" class="muted">No open positions. Enter one in Pre-Game.</td></tr></tbody>
+      </table>
+      <div class="err" id="liveErr"></div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <b style="font-size:12px">Simulate game:</b>
+        <button class="sm" id="playBtn" onclick="playPause()">▶ Play</button>
+        <button class="sm ghost" onclick="advanceOnce()">⏭ Advance one</button>
+        <button class="sm ghost" onclick="simulateToFinal()">🏁 Run to final</button>
+        <span class="muted" style="font-size:12px">prices drift like a live market; games resolve on their own</span>
+      </div>
+
+      <div style="margin-top:12px">
+        <div style="font-weight:700;font-size:12px;color:var(--muted)">Your decision <span style="font-weight:400">(click a number)</span></div>
+        <div id="decisions"></div>
+        <div class="muted" id="decisionNote" style="font-size:12px;min-height:14px;margin-top:4px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ③ POST-GAME -->
+  <section class="area post">
+    <h2 class="collapser" onclick="toggle(this)"><span class="num">4</span> Post-Game Analysis — settled &amp; closed
+      <span class="tag">what actually happened + the lesson</span><span class="chev">▾</span></h2>
+    <div class="body">
+      <div class="summary" id="pgSummary"></div>
+      <div id="pgOut"><p class="muted">Nothing settled yet.</p></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (c) => (c == null ? '—' : (c < 0 ? '-$' : '$') + (Math.abs(c) / 100).toFixed(2));
+const cls = (c) => (c == null ? '' : c < 0 ? 'neg' : c > 0 ? 'pos' : '');
+
+function toggle(h) {
+  h.classList.toggle('collapsed');
+  const body = h.nextElementSibling;
+  if (body && body.classList.contains('body')) body.classList.toggle('hidden');
+}
+
+async function call(path, body) {
+  const res = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok || data.ok === false) throw new Error(data.error || 'request failed');
+  return data;
+}
+
+// ---- pinned strip + live positions ----
+function renderSnapshot(snap) {
+  const b = snap.bankroll, t = snap.target;
+  $('cash').textContent = fmt(b.currentCashCents);
+  $('committed').textContent = fmt(b.committedCents);
+  $('unreal').textContent = fmt(b.unrealizedPureProfitCents); $('unreal').className = cls(b.unrealizedPureProfitCents);
+  $('real').textContent = fmt(b.realizedPureProfitCents); $('real').className = cls(b.realizedPureProfitCents);
+
+  $('targetAmt').textContent = fmt(t.targetCents);
+  $('targetState').textContent = t.state;
+  $('targetState').className = 'state ' + t.state.replace('TARGET ', '').replace(' ', '');
+  $('targetAlert').textContent = t.alert || '';
+
+  const open = snap.positions.filter((p) => p.status === 'open');
+  $('posBody').innerHTML = open.length ? open.map((p) => {
+    const now = p.currentPriceCents ?? p.entryPriceCents;
+    return `<tr>
+      <td>${p.team ?? p.ticker}${p.opponent ? ' vs ' + p.opponent : ''}
+        <span class="status-open">[open]</span><br>
+        <span class="muted" style="font-size:11px">${p.ticker} · ${p.contracts}× · ${p.kind}</span></td>
+      <td>${p.entryPriceCents}¢</td>
+      <td><input id="gs-${p.id}" value="${(p.currentGameState ?? '').replace(/"/g,'&quot;')}" placeholder="Top 5, 2 out" style="width:120px">
+        <button class="sm ghost" onclick="setState('${p.id}')">Set</button></td>
+      <td><input type="number" id="np-${p.id}" value="${now}" min="1" max="99" style="width:60px">
+        <button class="sm ghost" onclick="setPrice('${p.ticker}','np-${p.id}')">Set¢</button></td>
+      <td>${fmt(p.currentValueCents)}</td>
+      <td class="${cls(p.unrealizedPureProfitCents)}">${fmt(p.unrealizedPureProfitCents)}</td>
+      <td>
+        <button class="sm" onclick="closePos('${p.id}','np-${p.id}')">Close</button>
+        <button class="sm ghost" onclick="settle('${p.id}','win')">Win</button>
+        <button class="sm ghost" onclick="settle('${p.id}','loss')">Loss</button></td></tr>`;
+  }).join('') : '<tr><td colspan="7" class="muted">No open positions. Enter one in Pre-Game.</td></tr>';
+  renderDecisions(snap);
+}
+
+// ---- Your Decision menu (numbered, click or matches spec's 1/2/3 replies) ----
+let decisionActions = [];
+function renderDecisions(snap) {
+  const open = snap.positions.filter((p) => p.status === 'open');
+  const t = snap.target.targetCents;
+  decisionActions = [];
+  let html = '';
+  const row = (n, label, hot) =>
+    `<div style="padding:3px 0"><button class="sm ${hot ? '' : 'ghost'}" style="min-width:26px" onclick="doDecision(${n})">${n}</button> ${label}</div>`;
+
+  open.forEach((p) => {
+    decisionActions.push(() => flashDecision(`Holding ${p.team ?? p.ticker} — no change`));
+    html += row(decisionActions.length, `Hold ${p.team ?? p.ticker}`);
+    if (p.unrealizedPureProfitCents != null && p.unrealizedPureProfitCents >= t) {
+      const price = p.currentPriceCents ?? p.entryPriceCents;
+      decisionActions.push(() => closeAtPrice(p.id, price));
+      html += row(decisionActions.length, `🔒 Lock ${p.team ?? p.ticker} target (+${fmt(p.unrealizedPureProfitCents)})`, true);
+    }
+  });
+  decisionActions.push(() => flashDecision('Waiting — monitoring the board'));
+  html += row(decisionActions.length, 'Wait');
+  decisionActions.push(() => { document.querySelector('.area.pre').scrollIntoView({ behavior: 'smooth', block: 'start' }); flashDecision('Evaluate a new opportunity in Pre-Game ↑'); });
+  html += row(decisionActions.length, 'Evaluate new opportunity');
+
+  $('decisions').innerHTML = html;
+}
+function doDecision(n) { const a = decisionActions[n - 1]; if (a) a(); }
+function flashDecision(msg) {
+  const el = $('decisionNote'); if (!el) return;
+  el.textContent = msg;
+  setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 2600);
+}
+async function closeAtPrice(id, priceCents) {
+  try { await call('/api/close', { id, exitPriceCents: priceCents }); await refresh(); }
+  catch (e) { $('liveErr').textContent = e.message; }
+}
+
+// ---- game simulation: unbiased random walk on each open price ----
+// With absorbing ends, a market starting at p wins ~p% of the time — so a 70¢
+// favorite really does win about 70% of games. Games resolve on their own.
+let playTimer = null;
+async function gameTick() {
+  const snap = (await call('/api/state')).snapshot;
+  const open = snap.positions.filter((p) => p.status === 'open');
+  if (!open.length) { stopPlay(); return false; }
+  for (const p of open) {
+    const cur = p.currentPriceCents ?? p.entryPriceCents;
+    let np = cur + Math.round((Math.random() * 2 - 1) * 5); // ±5¢ step, unbiased
+    if (np >= 97) { await call('/api/settle', { id: p.id, outcome: 'win' }); continue; }
+    if (np <= 3) { await call('/api/settle', { id: p.id, outcome: 'loss' }); continue; }
+    await call('/api/price', { ticker: p.ticker, priceCents: Math.max(1, Math.min(99, np)) });
+  }
+  await refresh();
+  return true;
+}
+async function advanceOnce() { try { await gameTick(); } catch (e) { $('liveErr').textContent = e.message; } }
+function stopPlay() { if (playTimer) { clearInterval(playTimer); playTimer = null; } const b = $('playBtn'); if (b) b.textContent = '▶ Play'; }
+function playPause() {
+  if (playTimer) { stopPlay(); return; }
+  $('playBtn').textContent = '⏸ Pause';
+  playTimer = setInterval(() => gameTick().catch(() => stopPlay()), 1400);
+}
+async function simulateToFinal() {
+  stopPlay();
+  for (let i = 0; i < 400; i++) {
+    const cont = await gameTick();
+    if (!cont) break;
+    await new Promise((r) => setTimeout(r, 90));
+  }
+}
+
+// ---- post-game ----
+function renderPostGame(pg) {
+  if (!pg.count) { $('pgSummary').textContent = ''; $('pgOut').innerHTML = '<p class="muted">Nothing settled or closed yet — close or settle a position above.</p>'; return; }
+  $('pgSummary').innerHTML = `Realized <b class="${cls(pg.totalRealizedCents)}">${fmt(pg.totalRealizedCents)}</b>` +
+    ` · ROI ${pg.roiPct}% · ${pg.wins}W–${pg.losses}L · ` +
+    (pg.targetAchieved ? '<b class="pos">🚨🎯 TARGET ACHIEVED</b>' : '<span class="muted">target not achieved</span>');
+  let html = '<table><thead><tr><th>Market</th><th>Kind</th><th>Entry → Exit</th><th>Stake</th><th>Ctr</th><th>Result</th><th>Realized</th><th>ROI</th><th>Lesson</th></tr></thead><tbody>';
+  for (const r of pg.reports) {
+    const exit = r.exit.type === 'exit' ? r.exit.priceCents + '¢' : r.exit.label.replace('settled ', '');
+    html += `<tr>
+      <td>${r.team ?? r.ticker}${r.opponent ? ' vs ' + r.opponent : ''}</td>
+      <td>${r.kind}</td>
+      <td>${r.entryPriceCents}¢ → ${exit}</td>
+      <td>${fmt(r.stakeCents)}</td>
+      <td>${r.contracts}</td>
+      <td class="${r.result === 'WIN' ? 'pos' : r.result === 'LOSS' ? 'neg' : ''}">${r.result}${r.targetReached ? ' 🎯' : ''}</td>
+      <td class="${cls(r.realizedPureProfitCents)}">${fmt(r.realizedPureProfitCents)}</td>
+      <td>${r.roiPct}%</td>
+      <td class="why">${r.lesson}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  $('pgOut').innerHTML = html;
+}
+
+async function refresh() {
+  try {
+    renderSnapshot((await call('/api/state')).snapshot);
+    renderPostGame((await call('/api/postgame')).postgame);
+    $('updatedAt').textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch (e) { $('liveErr').textContent = e.message; }
+}
+
+// ---- actions ----
+async function reset() {
+  try { await call('/api/reset', { startingDollars: +$('startDollars').value, targetDollars: +$('targetDollars').value }); await refresh(); }
+  catch (e) { $('liveErr').textContent = e.message; }
+}
+async function openPos() {
+  try {
+    $('openErr').textContent = '';
+    await call('/api/open', { team: $('oTeam').value, opponent: $('oOpp').value,
+      ticker: $('oTicker').value || $('oTeam').value, kind: $('oKind').value,
+      priceCents: +$('oPrice').value, stakeDollars: +$('oStake').value });
+    await refresh();
+  } catch (e) { $('openErr').textContent = e.message; }
+}
+async function setPrice(ticker, inputId) {
+  try { await call('/api/price', { ticker, priceCents: +$(inputId).value }); await refresh(); }
+  catch (e) { $('liveErr').textContent = e.message; }
+}
+async function setState(id) {
+  try { await call('/api/gamestate', { id, gameState: $('gs-' + id).value }); await refresh(); }
+  catch (e) { $('liveErr').textContent = e.message; }
+}
+async function closePos(id, inputId) {
+  try { await call('/api/close', { id, exitPriceCents: +$(inputId).value }); await refresh(); }
+  catch (e) { $('liveErr').textContent = e.message; }
+}
+async function settle(id, outcome) {
+  try { await call('/api/settle', { id, outcome }); await refresh(); }
+  catch (e) { $('liveErr').textContent = e.message; }
+}
+
+// ---- ranking board ----
+// Built-in board the ranking buttons operate on. When the Kalshi feed is wired in,
+// this will be replaced by the live MLB board.
+function gatherBoard() {
+  return [
+    { team: 'Yankees', opponent: 'Red Sox', kind: 'single', priceCents: 62 },
+    { team: 'Astros', opponent: 'Mariners', kind: 'single', priceCents: 48 },
+    { team: 'Rays', opponent: 'Blue Jays', kind: 'single', priceCents: 44 },
+    { team: 'Brewers', opponent: 'Reds', kind: 'single', priceCents: 71 },
+    { team: 'Marlins', opponent: 'Braves', kind: 'single', priceCents: 12 },
+  ];
+}
+
+async function rank() {
+  try {
+    $('rankErr').textContent = ''; $('pregameOut').innerHTML = '';
+    renderRanking((await call('/api/rank', { stakeDollars: +$('rStake').value, board: gatherBoard() })).ranking);
+  } catch (e) { $('rankErr').textContent = e.message; }
+}
+
+async function pregame() {
+  try {
+    $('rankErr').textContent = ''; $('rankOut').innerHTML = '';
+    renderPreGame((await call('/api/pregame', { board: gatherBoard() })).pregame);
+  } catch (e) { $('rankErr').textContent = e.message; }
+}
+
+// ---- staging: send selected ranked picks into "Enter a position" ----
+const esc = (v) => String(v ?? '').replace(/"/g, '&quot;');
+function stageRow(p) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="s-team" value="${esc(p.team)}" style="width:110px"></td>
+    <td><input class="s-opp" value="${esc(p.opponent)}" style="width:110px"></td>
+    <td><input class="s-ticker" value="${esc(p.ticker || p.team)}" style="width:120px"></td>
+    <td><select class="s-kind"><option${p.kind !== 'combo' ? ' selected' : ''}>single</option><option${p.kind === 'combo' ? ' selected' : ''}>combo</option></select></td>
+    <td><input class="s-price" type="number" min="1" max="99" value="${p.priceCents}" style="width:60px"></td>
+    <td><input class="s-stake" type="number" step="0.01" value="${(p.stakeForTargetCents / 100).toFixed(2)}" style="width:74px"></td>
+    <td><button class="sm" onclick="openStaged(this)">Open</button>
+        <button class="sm ghost" onclick="this.closest('tr').remove();hideStagedIfEmpty()">✕</button></td>`;
+  $('stagedBody').appendChild(tr);
+  $('stagedSection').style.display = '';
+}
+function hideStagedIfEmpty() {
+  if (!$('stagedBody').querySelector('tr')) $('stagedSection').style.display = 'none';
+}
+function stageSelected() {
+  const checks = [...document.querySelectorAll('#pregameOut .pick-check:checked')];
+  if (!checks.length) { $('rankErr').textContent = 'Tick one or more picks first.'; return; }
+  $('rankErr').textContent = '';
+  checks.forEach((c) => { const p = lastPregame && lastPregame.actionRanking[+c.dataset.i]; if (p) stageRow(p); c.checked = false; });
+  document.querySelector('.area.pre h2:nth-of-type(2)')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function openRowFrom(tr) {
+  await call('/api/open', {
+    team: tr.querySelector('.s-team').value,
+    opponent: tr.querySelector('.s-opp').value,
+    ticker: tr.querySelector('.s-ticker').value || tr.querySelector('.s-team').value,
+    kind: tr.querySelector('.s-kind').value,
+    priceCents: +tr.querySelector('.s-price').value,
+    stakeDollars: +tr.querySelector('.s-stake').value,
+  });
+}
+async function openStaged(btn) {
+  const tr = btn.closest('tr');
+  try { await openRowFrom(tr); tr.remove(); hideStagedIfEmpty(); await refresh(); }
+  catch (e) { $('openErr').textContent = e.message; }
+}
+async function openAllStaged() {
+  try {
+    for (const tr of [...$('stagedBody').querySelectorAll('tr')]) { await openRowFrom(tr); tr.remove(); }
+    hideStagedIfEmpty(); await refresh();
+  } catch (e) { $('openErr').textContent = e.message; }
+}
+
+let lastPregame = null;
+function renderPreGame(pg) {
+  lastPregame = pg;
+  const h = pg.header, tm = pg.targetMonitor;
+  let html = '<div style="border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:12px;background:#fff">';
+  html += '<div style="font-weight:800;letter-spacing:.03em;margin-bottom:8px">🧪 PRE-GAME REPORT <span class="muted" style="font-weight:500">— ⚪ simulation, prices as entered</span></div>';
+
+  // header line
+  html += `<div class="muted" style="font-size:12px;margin-bottom:10px">
+    Cash <b class="${cls(h.cashCents)}" style="color:var(--ink)">${fmt(h.cashCents)}</b> ·
+    Target <b style="color:var(--ink)">${fmt(h.targetCents)}</b> ·
+    Realized <b class="${cls(h.realizedPureProfitCents)}">${fmt(h.realizedPureProfitCents)}</b> ·
+    Potential <b class="${cls(h.potentialPureProfitCents)}">${fmt(h.potentialPureProfitCents)}</b> ·
+    Active positions ${h.activePositions} ·
+    Historical ${h.historicalActive ? '🧠 ' + h.historicalRecord + ' (' + h.historicalDecisions + ' decisions)' : '— none yet'} ·
+    Target lock ${h.targetLock ? '🔒' : '🔓'}</div>`;
+
+  // quick board
+  html += '<table><thead><tr><th></th><th>Team</th><th>Kalshi</th><th>Mkt prob</th><th>Stake for target</th><th>Potential</th><th>% of cash</th><th>Game time</th></tr></thead><tbody>';
+  for (const r of pg.quickBoard) {
+    html += `<tr>
+      <td class="medal">${r.medal}</td>
+      <td>${r.team ?? ''}${r.opponent ? ' <span class="muted">vs ' + r.opponent + '</span>' : ''} <span class="muted">(${r.kind})</span></td>
+      <td>${r.priceCents}¢</td>
+      <td>${r.marketProbabilityPct}%</td>
+      <td>${fmt(r.stakeForTargetCents)}${r.affordable ? '' : ' <span class="neg">⚠️</span>'}</td>
+      <td class="pos">+${fmt(r.potentialProfitCents)}</td>
+      <td class="${r.capitalPct >= 50 ? 'neg' : ''}">${r.capitalPct == null ? '—' : r.capitalPct + '%'}</td>
+      <td>${r.gameTime ?? '—'}</td></tr>`;
+  }
+  html += '</tbody></table>';
+
+  // action ranking narrative
+  html += '<div style="display:flex;align-items:center;gap:12px;margin:14px 0 6px">' +
+    '<span style="font-weight:700">🎯 Action ranking</span>' +
+    '<button class="sm" onclick="stageSelected()">⬇ Add selected to Enter a position</button></div>';
+  pg.actionRanking.forEach((it, i) => {
+    html += `<div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:10px;align-items:flex-start">
+      <input type="checkbox" class="pick-check" data-i="${i}" title="select" style="width:auto;margin-top:3px">
+      <div style="flex:1">
+        <div><span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
+          <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · score ${it.score}</span></div>
+        <div class="why">${it.why}</div>
+        <div class="why">📊 ${it.historicalFit}</div>
+        ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}
+        <div style="font-size:12px">→ ${it.action}</div>
+      </div>
+    </div>`;
+  });
+  if (pg.excluded.length) html += '<div class="muted" style="margin-top:8px;font-size:12px"><b>Excluded:</b> ' +
+    pg.excluded.map((e) => `${e.team ?? e.id} — ${e.reason}`).join(' · ') + '</div>';
+
+  // target monitor
+  html += `<div style="font-weight:700;margin:14px 0 6px">💰 Target monitor</div>
+    <table><tbody>
+      <tr><td class="muted">Starting bankroll</td><td>${fmt(tm.startingBankrollCents)}</td>
+          <td class="muted">Progress</td><td>${tm.progressPct}%</td></tr>
+      <tr><td class="muted">Realized profit</td><td class="${cls(tm.realizedPureProfitCents)}">${fmt(tm.realizedPureProfitCents)}</td>
+          <td class="muted">Within reach</td><td>${tm.withinReach ? '✅' : '❌'}</td></tr>
+      <tr><td class="muted">Potential profit</td><td class="${cls(tm.potentialPureProfitCents)}">${fmt(tm.potentialPureProfitCents)}</td>
+          <td class="muted">Approaching</td><td>${tm.approaching ? '✅' : '❌'}</td></tr>
+      <tr><td class="muted">Target</td><td>${fmt(tm.targetCents)}</td>
+          <td class="muted">Achieved</td><td>${tm.achieved ? '✅' : '❌'}</td></tr>
+      <tr><td class="muted">Affordable target bets</td><td colspan="3">${tm.affordableTargetBets}</td></tr>
+    </tbody></table>`;
+
+  html += '</div>';
+
+  $('pregameOut').innerHTML = html;
+}
+function renderRanking(r) {
+  let html = '<table><thead><tr><th></th><th>Market</th><th>Score</th><th>Prob</th><th>Risk</th><th>Potential</th><th>R/R</th><th>Why · next action</th></tr></thead><tbody>';
+  for (const it of r.ranked) {
+    html += `<tr>
+      <td class="medal">${it.medal}</td>
+      <td>${it.team ?? it.ticker}${it.opponent ? ' vs ' + it.opponent : ''} <span class="muted">(${it.kind})</span></td>
+      <td><b>${it.score}</b></td>
+      <td>${it.marketProbabilityPct}%</td>
+      <td>${fmt(it.riskCents)}</td>
+      <td class="pos">${fmt(it.potentialProfitCents)}</td>
+      <td>${it.rewardPerRisk}</td>
+      <td class="why">${it.why}<br>→ ${it.recommendedAction}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  if (r.excluded.length) html += '<div class="muted" style="margin-top:8px;font-size:12px"><b>Excluded:</b> ' +
+    r.excluded.map((e) => `${e.team ?? e.id} — ${e.reason}`).join(' · ') + '</div>';
+  $('rankOut').innerHTML = html;
+}
+
+refresh();
+</script>
+</body>
+</html>

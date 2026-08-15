@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sim-web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/server/server.js"],
+      "port": 3210
+    }
+  ]
+}
