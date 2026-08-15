@@ -301,6 +301,9 @@ function renderDecisions(snap) {
       decisionActions.push(() => doSwap(rep));
       html += row(decisionActions.length,
         `🔄 Swap ${rep.held.team} → ${rep.better.team} ${rep.better.priceCents}¢ (exit ${fmt(rep.exitRealizesCents)}, +${rep.scoreGain} better)`, true);
+      decisionActions.push(() => doAddReplacement(rep));
+      html += row(decisionActions.length,
+        `➕ Also open ${rep.better.team} ${rep.better.priceCents}¢ (keep ${rep.held.team})`);
     }
   });
   decisionActions.push(() => flashDecision('Waiting — monitoring the board'));
@@ -315,14 +318,26 @@ function doDecision(n) { const a = decisionActions[n - 1]; if (a) a(); }
 async function doSwap(rep) {
   try {
     await call('/api/close', { id: rep.positionId, exitPriceCents: rep.held.priceCents });
-    await call('/api/open', {
-      team: rep.better.team, ticker: rep.better.team, kind: rep.better.kind,
-      priceCents: rep.better.priceCents, stakeDollars: rep.better.stakeForTargetCents / 100,
-    });
+    await openBetter(rep);
     await refresh();
     flashDecision(`Swapped ${rep.held.team} → ${rep.better.team}`);
     document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) { $('liveErr').textContent = e.message; }
+}
+// Open the better leg as a NEW position, keeping the current one.
+async function doAddReplacement(rep) {
+  try {
+    await openBetter(rep);
+    await refresh();
+    flashDecision(`Opened ${rep.better.team} — kept ${rep.held.team}`);
+    document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { $('liveErr').textContent = e.message; }
+}
+function openBetter(rep) {
+  return call('/api/open', {
+    team: rep.better.team, ticker: rep.better.team, kind: rep.better.kind,
+    priceCents: rep.better.priceCents, stakeDollars: rep.better.stakeForTargetCents / 100,
+  });
 }
 function flashDecision(msg) {
   const el = $('decisionNote'); if (!el) return;
@@ -398,15 +413,18 @@ function renderReplacements(r) {
   if (!r || !r.suggestions || !r.suggestions.length) { el.innerHTML = ''; return; }
   let html = '<div style="margin-top:12px;border:1px solid var(--warn);border-radius:8px;padding:10px;background:#fffdf5">';
   html += '<b style="font-size:12px">🔄 Dynamic Replacement — a better leg may be available now</b>';
-  for (const s of r.suggestions) {
-    html += `<div style="font-size:12px;margin-top:6px">
+  r.suggestions.forEach((s, i) => {
+    html += `<div style="font-size:12px;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
       Your <b>${s.held.team}</b> (now ${s.held.priceCents}¢, score ${s.held.score}) →
-      consider <b>${s.better.team}</b> ${s.better.priceCents}¢ · ${s.better.payoutMultiple}× · score ${s.better.score}
-      <span class="pos">(+${s.scoreGain} better)</span>.
-      Exiting now realizes <span class="${cls(s.exitRealizesCents)}">${fmt(s.exitRealizesCents)}</span>.
-      ${s.better.affordableAfterExit ? '' : '<span class="muted">(freed capital may not cover the new stake)</span>'}
-      <span class="muted">— switching costs fees; this is a prompt, not a command.</span></div>`;
-  }
+      <b>${s.better.team}</b> ${s.better.priceCents}¢ · ${s.better.payoutMultiple}× · score ${s.better.score}
+      <span class="pos">(+${s.scoreGain} better)</span>. Exiting realizes <span class="${cls(s.exitRealizesCents)}">${fmt(s.exitRealizesCents)}</span>.
+      <div style="margin-top:5px">
+        <button class="sm" onclick="doSwap(lastReplacements.suggestions[${i}])">🔄 Swap (exit ${s.held.team})</button>
+        <button class="sm ghost" onclick="doAddReplacement(lastReplacements.suggestions[${i}])">➕ Open ${s.better.team} (keep ${s.held.team})</button>
+      </div>
+      ${s.better.affordableAfterExit ? '' : '<span class="muted">note: adding may exceed available cash</span>'}
+    </div>`;
+  });
   html += '</div>';
   el.innerHTML = html;
 }
