@@ -15,6 +15,7 @@ import { sessionPostGame } from '../report/postGameReport.js';
 import { buildPreGameReport, addCombos } from '../report/preGameReport.js';
 import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js';
 import { findReplacements } from '../ranking/dynamicReplacement.js';
+import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -122,7 +123,10 @@ function resolveCandidate(c, i) {
 
 // ---- API ------------------------------------------------------------------
 const api = {
-  'GET /api/state': () => ({ snapshot: engine.snapshot() }),
+  'GET /api/state': () => {
+    const snapshot = engine.snapshot();
+    return { snapshot, goalPath: computeGoalPath(snapshot) };
+  },
 
   'POST /api/reset': (body) => {
     engine = newEngine({

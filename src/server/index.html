@@ -152,6 +152,7 @@
     <h2 class="collapser" onclick="toggle(this)"><span class="num">3</span> Live Data Update — in-game
       <span class="tag">move the price / game state, hit Update, watch the target</span><span class="chev">▾</span></h2>
     <div class="body">
+      <div id="goalPath"></div>
       <table>
         <thead><tr><th>Position</th><th>Entry</th><th>Game state</th><th>Now (¢)</th><th>Value</th><th>Unrealized P/P</th><th>Actions</th></tr></thead>
         <tbody id="posBody"><tr><td colspan="7" class="muted">No open positions. Enter one in Pre-Game.</td></tr></tbody>
@@ -406,9 +407,25 @@ async function resolveMissed(id, outcome) { renderMissed((await call('/api/misse
 function rollMissed(id, priceCents) { resolveMissed(id, Math.random() < (priceCents / 100) ? 'win' : 'loss'); }
 async function clearMissed() { renderMissed((await call('/api/missed/clear', {})).missed); }
 
+function renderGoalPath(g) {
+  const el = $('goalPath');
+  if (!el || !g) return;
+  const color = (g.state === 'LOCK_AVAILABLE' || g.state === 'ACHIEVED') ? 'var(--good)'
+    : g.state === 'NEED_NEW_ENTRY' ? 'var(--bad)'
+    : g.state === 'NO_POSITIONS' ? 'var(--muted)'
+    : 'var(--accent)';
+  el.innerHTML = `<div style="border:1px solid var(--line);border-left:4px solid ${color};border-radius:8px;padding:10px 12px;background:#fff;margin-bottom:12px">
+    <b style="font-size:12px">🎯 Best path to target</b>
+    <div style="font-size:13px;margin-top:4px">${g.message}</div>
+    <div class="muted" style="font-size:12px;margin-top:2px">→ ${g.action}</div>
+  </div>`;
+}
+
 async function refresh() {
   try {
-    renderSnapshot((await call('/api/state')).snapshot);
+    const state = await call('/api/state');
+    renderSnapshot(state.snapshot);
+    renderGoalPath(state.goalPath);
     renderPostGame((await call('/api/postgame')).postgame);
     renderReplacements((await call('/api/replacements', { board: gatherBoard() })).replacements);
     renderMissed((await call('/api/missed')).missed);
