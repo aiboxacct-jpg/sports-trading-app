@@ -37,11 +37,40 @@ export function stakeForTarget(priceCents, targetCents, feeRate) {
   return null;
 }
 
+/**
+ * Return the board plus every 2-leg combo (parlay) of its priced singles.
+ * A combo pays only if BOTH legs win; its combined price is the product of the
+ * leg probabilities, so it's cheaper with a much bigger payout multiple.
+ */
+export function addCombos(board, { maxCombos = 20 } = {}) {
+  const singles = board.filter((c) => (c.kind ?? 'single') !== 'combo' && c.priceCents != null);
+  const combos = [];
+  for (let i = 0; i < singles.length; i++) {
+    for (let j = i + 1; j < singles.length; j++) {
+      if (combos.length >= maxCombos) break;
+      const a = singles[i];
+      const b = singles[j];
+      combos.push({
+        id: `combo-${a.id ?? a.team}-${b.id ?? b.team}`,
+        kind: 'combo',
+        team: `${a.team} + ${b.team}`,
+        gameTime: a.gameTime || b.gameTime || null,
+        status: 'open',
+        legs: [
+          { team: a.team, ticker: a.ticker, priceCents: a.priceCents },
+          { team: b.team, ticker: b.ticker, priceCents: b.priceCents },
+        ],
+      });
+    }
+  }
+  return [...board, ...combos];
+}
+
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const comboPriceCents = (legs) =>
   Math.max(1, Math.min(99, Math.round(legs.reduce((a, l) => a * (l.priceCents / 100), 1) * 100)));
 
-function evaluate(cand, { targetCents, cashCents, feeRate, historical }) {
+export function evaluate(cand, { targetCents, cashCents, feeRate, historical }) {
   const kind = cand.kind ?? 'single';
   const status = cand.status ?? 'open';
 
@@ -87,6 +116,8 @@ function evaluate(cand, { targetCents, cashCents, feeRate, historical }) {
     gameState: cand.gameState ?? null,
     priceCents,
     marketProbabilityPct: Math.round(impliedProb * 1000) / 10,
+    payoutMultiple: Math.round((100 / priceCents) * 10) / 10, // $1 stake pays this on a win
+    legs: cand.legs ? cand.legs.map((l) => ({ team: l.team, priceCents: l.priceCents })) : null,
     contracts: sized.contracts,
     stakeForTargetCents: sized.stakeCents,
     potentialProfitCents: sized.potentialProfitCents,
@@ -162,6 +193,7 @@ export function buildPreGameReport(snapshot, board, { feeRate, historical } = {}
     quickBoard: ranked.map((r) => ({
       rank: r.rank, medal: r.medal, team: r.team, opponent: r.opponent, kind: r.kind,
       priceCents: r.priceCents, marketProbabilityPct: r.marketProbabilityPct,
+      payoutMultiple: r.payoutMultiple, legs: r.legs,
       stakeForTargetCents: r.stakeForTargetCents, potentialProfitCents: r.potentialProfitCents,
       capitalPct: r.capitalPct, affordable: r.affordable, gameTime: r.gameTime,
     })),

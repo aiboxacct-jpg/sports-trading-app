@@ -67,6 +67,29 @@
   </div>
 
   <section>
+    <h2>Core Pillars</h2>
+    <p>The mission is not to pick winners — it is to answer, continuously:
+      <b>given the market, game state, bankroll, target, and my history, what's the best
+      decision now?</b> Eight pillars carry that:</p>
+    <table>
+      <thead><tr><th>Pillar</th><th>Purpose</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>🎯 Goal-Seeking Engine</td><td>Best path to the target?</td><td><span class="chip built">✅ BUILT</span></td></tr>
+        <tr><td>🔄 Dynamic Replacement</td><td>Is there a better leg now?</td><td><span class="chip built">✅ BUILT</span></td></tr>
+        <tr><td>🔒 Goal-Lock Hedging / Dynamic Completion</td><td>Can we shore up a position?</td><td><span class="chip stub">🟡 PARTIAL</span></td></tr>
+        <tr><td>🚨 Position Monitor</td><td>Should we review / exit?</td><td><span class="chip built">✅ BUILT</span></td></tr>
+        <tr><td>🛡️ Risk Engine</td><td>Don't chase.</td><td><span class="chip stub">🟡 PARTIAL</span></td></tr>
+        <tr><td>📊 Paper-Trading Ledger</td><td>Record everything.</td><td><span class="chip stub">🟡 PARTIAL</span></td></tr>
+        <tr><td>👻 Missed Opportunity Tracker</td><td>What did we leave on the table?</td><td><span class="chip planned">🗺️ PLANNED</span></td></tr>
+        <tr><td>📈 Learning Engine</td><td>What actually works over time?</td><td><span class="chip built">✅ BUILT</span></td></tr>
+      </tbody>
+    </table>
+    <div class="callout">Partial pillars: hedging is lock-by-exit only (no hedge
+      suggestions); the risk engine warns but doesn't enforce hard limits; the ledger
+      records everything but doesn't yet persist across restarts.</div>
+  </section>
+
+  <section>
     <h2>Modes <span class="chip built">✅ BUILT</span></h2>
     <p>Two completely separate modes. Simulation and live histories never mix.</p>
     <h3>1. Live Data Report <span class="chip stub">🔌 STUBBED</span></h3>

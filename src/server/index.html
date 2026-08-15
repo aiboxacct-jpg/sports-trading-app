@@ -156,6 +156,7 @@
         <tbody id="posBody"><tr><td colspan="7" class="muted">No open positions. Enter one in Pre-Game.</td></tr></tbody>
       </table>
       <div class="err" id="liveErr"></div>
+      <div id="replacements"></div>
 
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <b style="font-size:12px">Simulate game:</b>
@@ -336,10 +337,30 @@ function renderPostGame(pg) {
   $('pgOut').innerHTML = html;
 }
 
+function renderReplacements(r) {
+  const el = $('replacements');
+  if (!el) return;
+  if (!r || !r.suggestions || !r.suggestions.length) { el.innerHTML = ''; return; }
+  let html = '<div style="margin-top:12px;border:1px solid var(--warn);border-radius:8px;padding:10px;background:#fffdf5">';
+  html += '<b style="font-size:12px">🔄 Dynamic Replacement — a better leg may be available now</b>';
+  for (const s of r.suggestions) {
+    html += `<div style="font-size:12px;margin-top:6px">
+      Your <b>${s.held.team}</b> (now ${s.held.priceCents}¢, score ${s.held.score}) →
+      consider <b>${s.better.team}</b> ${s.better.priceCents}¢ · ${s.better.payoutMultiple}× · score ${s.better.score}
+      <span class="pos">(+${s.scoreGain} better)</span>.
+      Exiting now realizes <span class="${cls(s.exitRealizesCents)}">${fmt(s.exitRealizesCents)}</span>.
+      ${s.better.affordableAfterExit ? '' : '<span class="muted">(freed capital may not cover the new stake)</span>'}
+      <span class="muted">— switching costs fees; this is a prompt, not a command.</span></div>`;
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 async function refresh() {
   try {
     renderSnapshot((await call('/api/state')).snapshot);
     renderPostGame((await call('/api/postgame')).postgame);
+    renderReplacements((await call('/api/replacements', { board: gatherBoard() })).replacements);
     $('updatedAt').textContent = 'updated ' + new Date().toLocaleTimeString();
   } catch (e) { $('liveErr').textContent = e.message; }
 }
@@ -468,17 +489,20 @@ function renderPreGame(pg) {
     Target lock ${h.targetLock ? '🔒' : '🔓'}</div>`;
 
   // quick board
-  html += '<table><thead><tr><th></th><th>Team</th><th>Kalshi</th><th>Mkt prob</th><th>Stake for target</th><th>Potential</th><th>% of cash</th><th>Game time</th></tr></thead><tbody>';
+  html += '<table><thead><tr><th></th><th>Team</th><th>Kalshi</th><th>Mkt prob</th><th>Payout</th><th>Stake for target</th><th>Potential</th><th>% of cash</th></tr></thead><tbody>';
   for (const r of pg.quickBoard) {
+    const label = r.kind === 'combo'
+      ? `${r.team} <span class="muted">(combo: ${(r.legs || []).map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')})</span>`
+      : `${r.team ?? ''}${r.opponent ? ' <span class="muted">vs ' + r.opponent + '</span>' : ''} <span class="muted">(single)</span>`;
     html += `<tr>
       <td class="medal">${r.medal}</td>
-      <td>${r.team ?? ''}${r.opponent ? ' <span class="muted">vs ' + r.opponent + '</span>' : ''} <span class="muted">(${r.kind})</span></td>
+      <td>${label}</td>
       <td>${r.priceCents}¢</td>
       <td>${r.marketProbabilityPct}%</td>
+      <td><b>${r.payoutMultiple}×</b></td>
       <td>${fmt(r.stakeForTargetCents)}${r.affordable ? '' : ' <span class="neg">⚠️</span>'}</td>
       <td class="pos">+${fmt(r.potentialProfitCents)}</td>
-      <td class="${r.capitalPct >= 50 ? 'neg' : ''}">${r.capitalPct == null ? '—' : r.capitalPct + '%'}</td>
-      <td>${r.gameTime ?? '—'}</td></tr>`;
+      <td class="${r.capitalPct >= 50 ? 'neg' : ''}">${r.capitalPct == null ? '—' : r.capitalPct + '%'}</td></tr>`;
   }
   html += '</tbody></table>';
 
@@ -491,7 +515,8 @@ function renderPreGame(pg) {
       <input type="checkbox" class="pick-check" data-i="${i}" title="select" style="width:auto;margin-top:3px">
       <div style="flex:1">
         <div><span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
-          <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · score ${it.score}</span></div>
+          <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
+        ${it.legs ? `<div class="muted" style="font-size:11px">combo legs: ${it.legs.map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}</div>` : ''}
         <div class="why">${it.why}</div>
         <div class="why">📊 ${it.historicalFit}</div>
         ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}

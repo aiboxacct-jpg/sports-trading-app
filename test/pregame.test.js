@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { stakeForTarget, buildPreGameReport } from '../src/report/preGameReport.js';
+import { stakeForTarget, buildPreGameReport, addCombos } from '../src/report/preGameReport.js';
 import { SimEngine } from '../src/engine/simEngine.js';
 
 test('stakeForTarget: the WIN actually clears the target, net of fees', () => {
@@ -50,6 +50,35 @@ test('pre-game report ranks, sizes to target, and flags concentration', () => {
   assert.ok(nyy.capitalPct < 45); // ~38%, NOT the example's bogus 61%
   // decisions list ends with a Wait option
   assert.match(pg.decisions.at(-1), /Wait/);
+});
+
+test('addCombos generates every 2-leg parlay from priced singles', () => {
+  const board = [
+    { id: 'a', team: 'A', priceCents: 60, status: 'open' },
+    { id: 'b', team: 'B', priceCents: 50, status: 'open' },
+    { id: 'c', team: 'C', priceCents: 40, status: 'open' },
+    { id: 'd', team: 'D', priceCents: null, status: 'open' }, // unpriced -> not combined
+  ];
+  const out = addCombos(board);
+  const combos = out.filter((c) => c.kind === 'combo');
+  assert.equal(combos.length, 3); // C(3,2) from the three priced singles
+  const ab = combos.find((c) => c.team === 'A + B');
+  assert.deepEqual(ab.legs.map((l) => l.priceCents), [60, 50]);
+});
+
+test('combo pricing, payout multiple, and stake-to-target are consistent', () => {
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  const board = addCombos([
+    { id: 'a', team: 'A', priceCents: 50, status: 'open' },
+    { id: 'b', team: 'B', priceCents: 40, status: 'open' },
+  ]);
+  const pg = buildPreGameReport(eng.snapshot(), board, {});
+  const combo = pg.actionRanking.find((r) => r.kind === 'combo');
+  assert.equal(combo.priceCents, 20);          // 0.5 * 0.4 = 0.20
+  assert.equal(combo.payoutMultiple, 5);       // 100 / 20 = 5×
+  const single = pg.actionRanking.find((r) => r.team === 'A');
+  assert.equal(single.payoutMultiple, 2);      // 100 / 50 = 2×
+  assert.ok(combo.potentialProfitCents >= 500); // combo still sized to clear target
 });
 
 test('unaffordable target bet is flagged', () => {

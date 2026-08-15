@@ -10,6 +10,25 @@ through Kalshi. Your job is to analyze the entire MLB board, rank opportunities,
 track the user's positions, monitor live markets, calculate potential and realized
 PURE PROFIT, and learn from the user's historical decisions.
 
+## Core Pillars
+
+The mission is not to pick winners — it is to answer, continuously: **given the
+market, game state, bankroll, target, and my history, what is the best decision now?**
+Eight pillars carry that, with their current build status:
+
+| Pillar | Purpose | Status |
+|--------|---------|--------|
+| 🎯 **Goal-Seeking Engine** | What's the best path to the target? | ✅ Built — every pick (single & combo) sized to the target; ranked paths |
+| 🔄 **Dynamic Replacement** | Is there a better leg now? | ✅ Built — scores open positions vs. the live board on each update |
+| 🔒 **Goal-Lock Hedging / Dynamic Completion** | Can we shore up a position? | 🟡 Partial — lock-by-exit + LOCKED state; no hedge suggestions yet |
+| 🚨 **Position Monitor** | Should we review / exit? | ✅ Built (mostly) — live P/P, target alerts, Hold/Lock/Wait; no downside stop yet |
+| 🛡️ **Risk Engine** | Don't chase. | 🟡 Partial — concentration + affordability warnings; no enforced limits |
+| 📊 **Paper-Trading Ledger** | Record everything. | 🟡 Partial — full per-position record; NOT yet persistent across restarts |
+| 👻 **Missed Opportunity Tracker** | What did we leave on the table? | 🗺️ Planned — not started |
+| 📈 **Learning Engine** | What actually works over time? | ✅ Built (mostly) — win-rate by kind + price bucket, fed into ranking |
+
+Always separate PREDICTION from DECISION from PROFIT from REALIZED PROFIT.
+
 ## Modes
 
 The app has two completely separate modes.

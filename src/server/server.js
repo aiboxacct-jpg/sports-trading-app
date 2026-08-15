@@ -12,8 +12,9 @@ import { dirname, join } from 'node:path';
 import { SimEngine } from '../engine/simEngine.js';
 import { toCents } from '../domain/money.js';
 import { sessionPostGame } from '../report/postGameReport.js';
-import { buildPreGameReport } from '../report/preGameReport.js';
+import { buildPreGameReport, addCombos } from '../report/preGameReport.js';
 import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js';
+import { findReplacements } from '../ranking/dynamicReplacement.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
@@ -71,6 +72,19 @@ const int = (v) => {
   return n;
 };
 
+// Normalize a candidate from the client; resolve missing prices from the market.
+function resolveCandidate(c, i) {
+  const base = {
+    id: c.id || `cand-${i + 1}`, team: c.team, opponent: c.opponent,
+    kind: c.kind === 'combo' ? 'combo' : 'single',
+    gameTime: c.gameTime || null, gameState: c.gameState || null, status: c.status || 'open',
+  };
+  if (base.kind === 'combo') {
+    return { ...base, legs: (c.legs ?? []).map((l) => ({ ...l, priceCents: l.priceCents == null ? (l.ticker ? engine.market.getPrice(l.ticker) : null) : int(l.priceCents) })) };
+  }
+  return { ...base, ticker: c.ticker, priceCents: c.priceCents == null ? (c.ticker ? engine.market.getPrice(c.ticker) : null) : int(c.priceCents) };
+}
+
 // ---- API ------------------------------------------------------------------
 const api = {
   'GET /api/state': () => ({ snapshot: engine.snapshot() }),
@@ -125,17 +139,13 @@ const api = {
   }),
 
   'POST /api/pregame': (body) => {
-    const resolve = (c, i) => {
-      const base = { id: c.id || `cand-${i + 1}`, team: c.team, opponent: c.opponent,
-        kind: c.kind === 'combo' ? 'combo' : 'single', gameTime: c.gameTime || null,
-        gameState: c.gameState || null, status: c.status || 'open' };
-      if (base.kind === 'combo') {
-        return { ...base, legs: (c.legs ?? []).map((l) => ({ ...l, priceCents: l.priceCents == null ? (l.ticker ? engine.market.getPrice(l.ticker) : null) : int(l.priceCents) })) };
-      }
-      return { ...base, ticker: c.ticker, priceCents: c.priceCents == null ? (c.ticker ? engine.market.getPrice(c.ticker) : null) : int(c.priceCents) };
-    };
-    const board = (body.board ?? []).map(resolve);
+    const board = addCombos((body.board ?? []).map(resolveCandidate));
     return { pregame: buildPreGameReport(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+  },
+
+  'POST /api/replacements': (body) => {
+    const board = addCombos((body.board ?? []).map(resolveCandidate));
+    return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
   },
 
   'POST /api/rank': (body) => {
