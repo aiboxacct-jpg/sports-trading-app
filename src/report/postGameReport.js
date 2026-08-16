@@ -41,6 +41,7 @@ export function postGameForPosition(pos, { targetCents = 500 } = {}) {
     roiPct,
     targetReached,
     gameStateAtEntry: pos.gameStateAtEntry ?? null,
+    exitTs: pos.exitTs ?? null,
     priceJourney: Array.isArray(pos.priceJourney) ? pos.priceJourney : [],
     lesson: lessonFor({ result, targetReached, bucket, status: pos.status, kind: pos.kind }),
   };

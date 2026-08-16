@@ -90,6 +90,8 @@
   .pick-card.selected { background: #e8f1ff; border-left-color: var(--accent); }
   .rankrow { cursor: pointer; }
   .rankrow:hover { background: #eef2f7; }
+  tr.pg-recent-win td { background: #e7f6ec; }   /* most-recent win */
+  tr.pg-recent-loss td { background: #ffe3e3; }  /* most-recent loss */
   .err { color: var(--bad); font-size: 12px; min-height: 15px; margin-top: 6px; }
   .status-open { color: var(--warn); } .status-closed { color: var(--muted); } .status-settled { color: var(--good); }
   @keyframes blinkred { 0%, 100% { background: transparent; } 50% { background: #ffdede; } }
@@ -526,11 +528,16 @@ function renderPostGame(pg) {
   $('pgSummary').innerHTML = `Realized <b class="${cls(pg.totalRealizedCents)}">${fmt(pg.totalRealizedCents)}</b>` +
     ` · ROI ${pg.roiPct}% · ${pg.wins}W–${pg.losses}L · ` +
     (pg.targetAchieved ? '<b class="pos">🚨🎯 TARGET ACHIEVED</b>' : '<span class="muted">target not achieved</span>');
+  // newest first, and highlight the most-recent batch (finished within ~6s of the latest)
+  const rows = [...pg.reports].sort((a, b) => (Date.parse(b.exitTs || 0) || 0) - (Date.parse(a.exitTs || 0) || 0));
+  const latestMs = rows.length ? (Date.parse(rows[0].exitTs || 0) || 0) : 0;
   let html = '<table><thead><tr><th>Market</th><th>Kind</th><th>Entry → Exit</th><th>Stake</th><th>Ctr</th><th>Result</th><th>Realized</th><th>ROI</th><th>Lesson</th></tr></thead><tbody>';
-  for (const r of pg.reports) {
+  for (const r of rows) {
     const exit = r.exit.type === 'exit' ? r.exit.priceCents + '¢' : r.exit.label.replace('settled ', '');
-    html += `<tr>
-      <td>${r.team ?? r.ticker}${r.opponent ? ' vs ' + r.opponent : ''}</td>
+    const recent = latestMs && (latestMs - (Date.parse(r.exitTs || 0) || 0)) <= 6000; // most-recent batch
+    const rowCls = recent ? (r.result === 'WIN' ? 'pg-recent-win' : r.result === 'LOSS' ? 'pg-recent-loss' : '') : '';
+    html += `<tr class="${rowCls}">
+      <td>${r.team ?? r.ticker}${r.opponent ? ' vs ' + r.opponent : ''}${recent ? ' <span class="muted" style="font-size:10px">◀ latest</span>' : ''}</td>
       <td>${r.kind}</td>
       <td>${r.entryPriceCents}¢ → ${exit}</td>
       <td>${fmt(r.stakeCents)}</td>
