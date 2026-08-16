@@ -77,6 +77,8 @@
   .pick-card { border-top: 1px solid var(--line); padding: 8px 10px; cursor: pointer; border-left: 3px solid transparent; border-radius: 4px; }
   .pick-card:hover { background: #eef2f7; }
   .pick-card.selected { background: #e8f1ff; border-left-color: var(--accent); }
+  .rankrow { cursor: pointer; }
+  .rankrow:hover { background: #eef2f7; }
   .err { color: var(--bad); font-size: 12px; min-height: 15px; margin-top: 6px; }
   .status-open { color: var(--warn); } .status-closed { color: var(--muted); } .status-settled { color: var(--good); }
   .summary { font-size: 14px; margin-bottom: 8px; }
@@ -877,10 +879,13 @@ function renderPreGame(pg) {
 
   $('pregameOut').innerHTML = html;
 }
+let lastRanking = null;
 function renderRanking(r) {
-  let html = '<table><thead><tr><th></th><th>Market</th><th>Score</th><th>Prob</th><th>Risk</th><th>Potential</th><th>R/R</th><th>Why · next action</th></tr></thead><tbody>';
-  for (const it of r.ranked) {
-    html += `<tr>
+  lastRanking = r;
+  let html = '<div class="muted" style="font-size:12px;margin:6px 0">👉 Click any row to enter it at your stake.</div>';
+  html += '<table><thead><tr><th></th><th>Market</th><th>Score</th><th>Prob</th><th>Risk</th><th>Potential</th><th>R/R</th><th>Why · next action</th></tr></thead><tbody>';
+  r.ranked.forEach((it, i) => {
+    html += `<tr class="rankrow" onclick="openQuickPick(${i})" title="Click to enter this position">
       <td class="medal">${it.medal}</td>
       <td>${it.team ?? it.ticker}${it.opponent ? ' vs ' + it.opponent : ''} <span class="muted">(${it.kind})</span></td>
       <td><b>${it.score}</b></td>
@@ -889,11 +894,21 @@ function renderRanking(r) {
       <td class="pos">${fmt(it.potentialProfitCents)}</td>
       <td>${it.rewardPerRisk}</td>
       <td class="why">${it.why}<br>→ ${it.recommendedAction}</td></tr>`;
-  }
+  });
   html += '</tbody></table>';
   if (r.excluded.length) html += '<div class="muted" style="margin-top:8px;font-size:12px"><b>Excluded:</b> ' +
     r.excluded.map((e) => `${e.team ?? e.id} — ${e.reason}`).join(' · ') + '</div>';
   $('rankOut').innerHTML = html;
+}
+async function openQuickPick(i) {
+  const p = lastRanking && lastRanking.ranked[i];
+  if (!p) return;
+  try {
+    await call('/api/open', { team: p.team, opponent: p.opponent, ticker: p.ticker || p.team, kind: p.kind, priceCents: p.priceCents, stakeDollars: +$('rStake').value });
+    await refresh();
+    flashDecision(`Entered ${p.team ?? p.ticker}`);
+    document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { $('rankErr').textContent = e.message; }
 }
 
 $('autoLockCb').checked = autoLock;
