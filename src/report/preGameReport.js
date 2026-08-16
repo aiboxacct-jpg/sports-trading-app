@@ -69,11 +69,25 @@ export function addCombos(board, { maxCombos = 20 } = {}) {
   return [...board, ...combos];
 }
 
+/**
+ * Fixed-stake sizing: buy as many whole contracts as `stakeCents` affords at the
+ * price, and report the realistic profit (may be below the target). Returns null if
+ * the stake can't cover even one contract.
+ */
+export function fixedStake(priceCents, stakeCents, feeRate) {
+  assertPrice(priceCents);
+  const contracts = Math.floor(stakeCents / priceCents);
+  if (contracts <= 0) return null;
+  const cost = contracts * priceCents;
+  const entryFeeCents = tradeFeeCents(contracts, priceCents, feeRate);
+  return { contracts, stakeCents: cost, potentialProfitCents: contracts * (100 - priceCents) - entryFeeCents, entryFeeCents };
+}
+
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const comboPriceCents = (legs) =>
   Math.max(1, Math.min(99, Math.round(legs.reduce((a, l) => a * (l.priceCents / 100), 1) * 100)));
 
-export function evaluate(cand, { targetCents, cashCents, feeRate, historical }) {
+export function evaluate(cand, { targetCents, cashCents, feeRate, historical, stakeCents, sizeMode }) {
   const kind = cand.kind ?? 'single';
   const status = cand.status ?? 'open';
 
@@ -92,8 +106,11 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical }) 
   }
   if (status !== 'open') return { excluded: true, id: cand.id, team: cand.team, reason: `market is ${status}` };
 
-  const sized = stakeForTarget(priceCents, targetCents, feeRate);
-  if (!sized) return { excluded: true, id: cand.id, team: cand.team, reason: 'price too high to reach target' };
+  const sized = (sizeMode === 'fixed' && stakeCents != null)
+    ? fixedStake(priceCents, stakeCents, feeRate)
+    : stakeForTarget(priceCents, targetCents, feeRate);
+  if (!sized) return { excluded: true, id: cand.id, team: cand.team, reason: sizeMode === 'fixed' ? 'stake too small for one contract' : 'price too high to reach target' };
+  const reachesTarget = sized.potentialProfitCents >= targetCents;
 
   const affordable = cashCents == null ? true : sized.stakeCents <= cashCents;
   const capitalPct = cashCents > 0 ? Math.round((sized.stakeCents / cashCents) * 1000) / 10 : null;
@@ -147,6 +164,7 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical }) 
     evPctOfStake: Math.round(evPerDollar * 1000) / 10,
     historicallyInformed: histKnown,
     historicalFit: hist.rationale,
+    reachesTarget,
     score,
   };
 }
@@ -169,9 +187,9 @@ function narrate(item, targetCents) {
     : item.capitalPct != null && item.capitalPct >= 50
       ? `⚠️ Heavy concentration: one bet would tie up ${item.capitalPct}% of your cash.`
       : null;
-  const action = item.affordable
-    ? `Enter ${item.kind} — ${item.contracts} @ ${item.priceCents}¢ (${fmt(item.stakeForTargetCents)})`
-    : `Skip or size down — full target bet is unaffordable`;
+  const action = !item.affordable
+    ? `Skip or size down — stake exceeds available cash`
+    : `Enter ${item.kind} — ${item.contracts} @ ${item.priceCents}¢ (${fmt(item.stakeForTargetCents)}) → +${fmt(item.potentialProfitCents)} on a win`;
   return { why, warning, action };
 }
 
@@ -181,11 +199,11 @@ function narrate(item, targetCents) {
  * @param {Array}  board     candidate markets (prices resolved)
  * @param {Object} opts      { feeRate, historical }
  */
-export function buildPreGameReport(snapshot, board, { feeRate, historical } = {}) {
+export function buildPreGameReport(snapshot, board, { feeRate, historical, stakeCents, sizeMode } = {}) {
   const targetCents = snapshot.target.targetCents;
   const cashCents = snapshot.bankroll.currentCashCents;
 
-  const evaluated = board.map((c) => evaluate(c, { targetCents, cashCents, feeRate, historical }));
+  const evaluated = board.map((c) => evaluate(c, { targetCents, cashCents, feeRate, historical, stakeCents, sizeMode }));
   const ranked = evaluated.filter((e) => !e.excluded)
     .sort((a, b) => b.score - a.score || b.evCents - a.evCents || b.priceCents - a.priceCents);
   const excluded = evaluated.filter((e) => e.excluded);

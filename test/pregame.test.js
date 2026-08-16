@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { stakeForTarget, buildPreGameReport, addCombos } from '../src/report/preGameReport.js';
+import { stakeForTarget, fixedStake, buildPreGameReport, addCombos } from '../src/report/preGameReport.js';
 import { SimEngine } from '../src/engine/simEngine.js';
 import { HistoricalDecisionEngine } from '../src/ranking/historicalDecisionEngine.js';
 
@@ -111,6 +111,25 @@ test('single-vs-combo verdict steers toward the more profitable kind', () => {
   assert.match(s.verdict, /Favor singles/);
   assert.equal(s.single.n, 4);
   assert.equal(s.combo.n, 4);
+});
+
+test('fixedStake buys whole contracts and reports realistic profit', () => {
+  const r = fixedStake(71, 100); // $1 at 71¢
+  assert.equal(r.contracts, 1);
+  assert.equal(r.stakeCents, 71);
+  const r2 = fixedStake(12, 100); // $1 at 12¢
+  assert.equal(r2.contracts, 8);
+  assert.equal(fixedStake(71, 50), null); // 50¢ can't buy a 71¢ contract
+});
+
+test('fixed-stake mode sizes to the user dollars, not the target', () => {
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  const pg = buildPreGameReport(eng.snapshot(), [{ id: 'x', team: 'X', priceCents: 71, status: 'open' }], { stakeCents: 100, sizeMode: 'fixed' });
+  const it = pg.actionRanking[0];
+  assert.equal(it.contracts, 1);              // $1 buys one 71¢ contract
+  assert.equal(it.stakeForTargetCents, 71);   // committed = actual cost, not $13.49
+  assert.ok(it.potentialProfitCents < 500);   // realistic profit, below the +$5 target
+  assert.equal(it.reachesTarget, false);
 });
 
 test('unaffordable target bet is flagged', () => {

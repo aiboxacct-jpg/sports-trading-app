@@ -173,6 +173,14 @@ function resolveCandidate(c, i) {
   return { ...base, ticker: c.ticker, priceCents: c.priceCents == null ? (c.ticker ? engine.market.getPrice(c.ticker) : null) : int(c.priceCents) };
 }
 
+// Sizing options from a request: fixed stake (respect the user's dollars) or size-to-target.
+function sizingOpts(body) {
+  return {
+    sizeMode: body && body.sizeMode === 'fixed' ? 'fixed' : 'target',
+    stakeCents: body && body.stakeDollars != null ? toCents(Number(body.stakeDollars)) : undefined,
+  };
+}
+
 // ---- API ------------------------------------------------------------------
 const api = {
   'GET /api/state': () => {
@@ -243,39 +251,39 @@ const api = {
 
   'POST /api/pregame': (body) => {
     const board = addCombos((body.board ?? []).map(resolveCandidate));
-    return { pregame: buildPreGameReport(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+    return { pregame: buildPreGameReport(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
-  'POST /api/livegame': () => ({
-    livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }),
+  'POST /api/livegame': (body) => ({
+    livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }),
   }),
 
-  'POST /api/livegame/refresh': () => {
+  'POST /api/livegame/refresh': (body) => {
     driftLiveBoard();
-    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
   // Pull a fresh random daily slate of live games.
-  'POST /api/livegame/new': () => {
+  'POST /api/livegame/new': (body) => {
     liveBoard = generateLiveBoard();
-    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
   // Advance the live board one clock step: drift prices + move each game's inning.
   // A game that finishes regulation restarts as a fresh matchup so the board stays live.
-  'POST /api/livegame/tick': () => {
+  'POST /api/livegame/tick': (body) => {
     for (const g of liveBoard) {
       g.priceCents = Math.max(1, Math.min(99, g.priceCents + Math.round((Math.random() * 2 - 1) * 4)));
       g.step = (g.step ?? 0) + 1;
       if (g.step > 17) { g.step = 0; g.priceCents = 40 + Math.floor(Math.random() * 21); } // new game
       g.gameState = liveInningLabel(g.step);
     }
-    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
   'POST /api/replacements': (body) => {
     const board = addCombos((body.board ?? []).map(resolveCandidate));
-    return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+    return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
   'GET /api/missed': () => ({ missed: missedSummary() }),

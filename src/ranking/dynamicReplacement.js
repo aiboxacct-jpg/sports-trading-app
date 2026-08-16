@@ -11,13 +11,13 @@
 
 import { evaluate } from '../report/preGameReport.js';
 
-export function findReplacements(snapshot, board, { feeRate, historical, margin = 5 } = {}) {
+export function findReplacements(snapshot, board, { feeRate, historical, margin = 5, stakeCents, sizeMode } = {}) {
   const targetCents = snapshot.target.targetCents;
   const cashCents = snapshot.bankroll.currentCashCents;
   const open = snapshot.positions.filter((p) => p.status === 'open' && p.currentPriceCents != null);
   if (!open.length) return { suggestions: [], margin };
 
-  const ctx = { targetCents, cashCents, feeRate, historical };
+  const ctx = { targetCents, cashCents, feeRate, historical, stakeCents, sizeMode };
   const heldKeys = new Set();
   for (const p of open) { if (p.ticker) heldKeys.add(p.ticker); if (p.team) heldKeys.add(p.team); }
   const held = (key) => key != null && heldKeys.has(key);

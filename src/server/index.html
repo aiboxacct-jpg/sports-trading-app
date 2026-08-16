@@ -122,7 +122,8 @@
     <div class="body">
       <div id="pregameOut"></div>
       <div class="row" style="margin-bottom:10px">
-        <div style="flex:0 0 auto"><label>Stake each ($)</label><input id="rStake" type="number" value="10" style="width:100px" /></div>
+        <div style="flex:0 0 auto"><label>Stake ($)</label><input id="rStake" type="number" value="10" step="0.5" style="width:90px" /></div>
+        <div style="flex:0 0 auto"><label>Sizing</label><select id="sizeMode" style="width:auto" onchange="pregame()"><option value="fixed">Fixed stake</option><option value="target">Size to +target</option></select></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="rank()">Quick rank</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="pregame()">📋 Pre-Game Report</button></div>
       </div>
@@ -238,6 +239,11 @@ function toggle(h) {
   h.classList.toggle('collapsed');
   const body = h.nextElementSibling;
   if (body && body.classList.contains('body')) body.classList.toggle('hidden');
+}
+
+// Current sizing preference: fixed dollar stake, or size-to-target.
+function sizing() {
+  return { stakeDollars: +$('rStake').value || 10, sizeMode: ($('sizeMode') && $('sizeMode').value) || 'fixed' };
 }
 
 async function call(path, body) {
@@ -415,7 +421,7 @@ async function gameTick() {
   }
   setGameClock(clockTxt);
   if (atFinal) gameStep = 0;
-  await call('/api/livegame/tick', {}); // advance the other live games too
+  await call('/api/livegame/tick', sizing()); // advance the other live games too
   await refresh();
   return !atFinal;
 }
@@ -587,8 +593,8 @@ async function refresh() {
       }
     }
     // fetch replacements first so the decision tree can offer one-click swaps
-    lastReplacements = (await call('/api/replacements', { board: gatherBoard() })).replacements;
-    lastLivegame = (await call('/api/livegame', {})).livegame;   // ranked live board for the decision menu
+    lastReplacements = (await call('/api/replacements', { board: gatherBoard(), ...sizing() })).replacements;
+    lastLivegame = (await call('/api/livegame', sizing())).livegame;   // ranked live board for the decision menu
     renderSnapshot(state.snapshot);
     renderGoalPath(state.goalPath);
     renderReplacements(lastReplacements);
@@ -675,22 +681,22 @@ async function rank() {
 async function pregame() {
   try {
     $('rankErr').textContent = ''; $('rankOut').innerHTML = '';
-    renderPreGame((await call('/api/pregame', { board: gatherBoard() })).pregame);
+    renderPreGame((await call('/api/pregame', { board: gatherBoard(), ...sizing() })).pregame);
   } catch (e) { $('rankErr').textContent = e.message; }
 }
 
 // ---- 🔴 Live Game Board: scan in-progress games and jump in ----
 let lastLivegame = null;
 async function livegame() {
-  try { renderLiveGame((await call('/api/livegame', {})).livegame); }
+  try { renderLiveGame((await call('/api/livegame', sizing())).livegame); }
   catch (e) { $('livegameErr').textContent = e.message; }
 }
 async function refreshLiveGames() {
-  try { renderLiveGame((await call('/api/livegame/refresh', {})).livegame); }
+  try { renderLiveGame((await call('/api/livegame/refresh', sizing())).livegame); }
   catch (e) { $('livegameErr').textContent = e.message; }
 }
 async function newSlate() {
-  try { renderLiveGame((await call('/api/livegame/new', {})).livegame); await refresh(); }
+  try { renderLiveGame((await call('/api/livegame/new', sizing())).livegame); await refresh(); }
   catch (e) { $('livegameErr').textContent = e.message; }
 }
 function renderLiveGame(pg) {
