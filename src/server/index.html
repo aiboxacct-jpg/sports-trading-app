@@ -316,6 +316,17 @@ function renderDecisions(snap) {
         `➕ Also open ${rep.better.team} ${rep.better.priceCents}¢ (keep ${rep.held.team})`);
     }
   });
+  // best available live games to jump into (top of the value ranking, not already held)
+  const heldTickers = new Set(open.map((p) => p.ticker));
+  const liveTop = ((lastLivegame && lastLivegame.actionRanking) || [])
+    .filter((g) => !heldTickers.has(g.ticker))
+    .slice(0, 2);
+  liveTop.forEach((g) => {
+    decisionActions.push(() => enterLivePick(g));
+    const edge = g.historicallyInformed ? `, edge ${g.edgePct >= 0 ? '+' : ''}${g.edgePct}%` : '';
+    html += row(decisionActions.length, `🔴 Enter ${g.team} (live · ${g.gameState ?? ''}) — ${g.priceCents}¢ · ${g.payoutMultiple}×${edge}`);
+  });
+
   decisionActions.push(() => flashDecision('Waiting — monitoring the board'));
   html += row(decisionActions.length, 'Wait');
   decisionActions.push(() => { document.querySelector('.area.pre').scrollIntoView({ behavior: 'smooth', block: 'start' }); flashDecision('Evaluate a new opportunity in Pre-Game ↑'); });
@@ -358,6 +369,14 @@ async function closeAtPrice(id, priceCents) {
   try { await call('/api/close', { id, exitPriceCents: priceCents }); await refresh(); }
   catch (e) { $('liveErr').textContent = e.message; }
 }
+// Enter a live game straight from the decision menu, at its target stake.
+async function enterLivePick(g) {
+  try {
+    await call('/api/open', { team: g.team, opponent: g.opponent, ticker: g.ticker || g.team, kind: g.kind, priceCents: g.priceCents, stakeDollars: g.stakeForTargetCents / 100, gameState: g.gameState || null });
+    await refresh();
+    flashDecision(`Entered ${g.team} (live)`);
+  } catch (e) { $('liveErr').textContent = e.message; }
+}
 
 // ---- game simulation: play the FULL game, inning-by-inning (MLB) or period (NHL) ----
 // Each step advances the game clock and random-walks every open price. The game runs
@@ -393,6 +412,7 @@ async function gameTick() {
   }
   setGameClock(clockTxt);
   if (atFinal) gameStep = 0;
+  await call('/api/livegame/tick', {}); // advance the other live games too
   await refresh();
   return !atFinal;
 }
@@ -565,9 +585,11 @@ async function refresh() {
     }
     // fetch replacements first so the decision tree can offer one-click swaps
     lastReplacements = (await call('/api/replacements', { board: gatherBoard() })).replacements;
+    lastLivegame = (await call('/api/livegame', {})).livegame;   // ranked live board for the decision menu
     renderSnapshot(state.snapshot);
     renderGoalPath(state.goalPath);
     renderReplacements(lastReplacements);
+    renderLiveGame(lastLivegame);
     renderPostGame((await call('/api/postgame')).postgame);
     renderMissed((await call('/api/missed')).missed);
     const el = $('updatedAt');

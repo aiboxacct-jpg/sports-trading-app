@@ -32,12 +32,18 @@ let liveBoard;    // 🔴 games "in progress" you can jump into (simulated; a li
 // illustrative until a real MLB feed is wired in.
 function defaultLiveBoard() {
   return [
-    { id: 'lv-cubs', team: 'Cubs', opponent: 'Cardinals', ticker: 'LIVE-CUBS', priceCents: 58, gameState: 'Bot 5 · 2-1 CHC', status: 'open' },
-    { id: 'lv-mets', team: 'Mets', opponent: 'Phillies', ticker: 'LIVE-METS', priceCents: 47, gameState: 'Top 6 · 3-3', status: 'open' },
-    { id: 'lv-lad', team: 'Dodgers', opponent: 'Padres', ticker: 'LIVE-LAD', priceCents: 66, gameState: 'Bot 7 · 5-2 LAD', status: 'open' },
-    { id: 'lv-cle', team: 'Guardians', opponent: 'Tigers', ticker: 'LIVE-CLE', priceCents: 39, gameState: 'Top 4 · 1-0 DET', status: 'open' },
-    { id: 'lv-bal', team: 'Orioles', opponent: 'Rays', ticker: 'LIVE-BAL', priceCents: 52, gameState: 'Bot 3 · 0-0', status: 'open' },
+    { id: 'lv-cubs', team: 'Cubs', opponent: 'Cardinals', ticker: 'LIVE-CUBS', priceCents: 58, step: 9, gameState: 'Bot 5', status: 'open' },
+    { id: 'lv-mets', team: 'Mets', opponent: 'Phillies', ticker: 'LIVE-METS', priceCents: 47, step: 11, gameState: 'Bot 6', status: 'open' },
+    { id: 'lv-lad', team: 'Dodgers', opponent: 'Padres', ticker: 'LIVE-LAD', priceCents: 66, step: 13, gameState: 'Bot 7', status: 'open' },
+    { id: 'lv-cle', team: 'Guardians', opponent: 'Tigers', ticker: 'LIVE-CLE', priceCents: 39, step: 6, gameState: 'Top 4', status: 'open' },
+    { id: 'lv-bal', team: 'Orioles', opponent: 'Rays', ticker: 'LIVE-BAL', priceCents: 52, step: 5, gameState: 'Bot 3', status: 'open' },
   ];
+}
+
+// MLB inning label for a live-board step (0..17 = Top 1 .. Bot 9).
+function liveInningLabel(step) {
+  const s = ((step % 18) + 18) % 18;
+  return `${s % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(s / 2) + 1}`;
 }
 
 const saved = loadState(STATE_FILE);
@@ -225,6 +231,18 @@ const api = {
     return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
   },
 
+  // Advance the live board one clock step: drift prices + move each game's inning.
+  // A game that finishes regulation restarts as a fresh matchup so the board stays live.
+  'POST /api/livegame/tick': () => {
+    for (const g of liveBoard) {
+      g.priceCents = Math.max(1, Math.min(99, g.priceCents + Math.round((Math.random() * 2 - 1) * 4)));
+      g.step = (g.step ?? 0) + 1;
+      if (g.step > 17) { g.step = 0; g.priceCents = 40 + Math.floor(Math.random() * 21); } // new game
+      g.gameState = liveInningLabel(g.step);
+    }
+    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+  },
+
   'POST /api/replacements': (body) => {
     const board = addCombos((body.board ?? []).map(resolveCandidate));
     return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine() }) };
@@ -285,7 +303,7 @@ const api = {
 // Routes that change state and must be persisted after handling.
 const MUTATING = new Set([
   '/api/reset', '/api/clear', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
-  '/api/missed/log', '/api/missed/resolve', '/api/missed/clear', '/api/livegame/refresh',
+  '/api/missed/log', '/api/missed/resolve', '/api/missed/clear', '/api/livegame/refresh', '/api/livegame/tick',
 ]);
 
 // ---- request routing ------------------------------------------------------
