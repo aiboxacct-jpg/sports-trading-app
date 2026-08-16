@@ -177,6 +177,8 @@
     <div class="body">
       <div class="row" style="margin-bottom:10px">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="refreshLiveGames()">🔄 Refresh prices</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="newSlate()">🎲 New slate</button></div>
       </div>
@@ -208,7 +210,7 @@
           <option value="6000">Slow · 6s</option>
           <option value="10000">Very slow · 10s</option>
         </select>
-        <button class="sm" id="playBtn" onclick="playPause()">▶ Play</button>
+        <button class="sm play-btn" id="playBtn" onclick="playPause()">▶ Play</button>
         <button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button>
         <button class="sm ghost" onclick="simulateToFinal()">🏁 Run to final</button>
         <b id="gameClock" style="font-size:13px;color:var(--bad)"></b>
@@ -447,34 +449,39 @@ async function gameTick() {
   const fmtG = GAME_FORMATS[currentSport()];
   const snap = (await call('/api/state')).snapshot;
   const open = snap.positions.filter((p) => p.status === 'open');
-  if (!open.length) { gameStep = 0; setGameClock(''); stopPlay(); return false; }
 
-  gameStep += 1;
-  const atFinal = gameStep > fmtG.totalSteps;         // played full regulation -> settle
-  const clockTxt = atFinal ? 'Final' : fmtG.label(gameStep - 1);
-  for (const p of open) {
-    const cur = p.currentPriceCents ?? p.entryPriceCents;
-    const np = Math.max(1, Math.min(99, cur + Math.round((Math.random() * 2 - 1) * 5)));
-    await call('/api/price', { ticker: p.ticker, priceCents: np });
-    if (atFinal) {
-      await call('/api/settle', { id: p.id, outcome: Math.random() < np / 100 ? 'win' : 'loss' });
-    } else {
-      await call('/api/gamestate', { id: p.id, gameState: clockTxt });
+  // Advance YOUR game clock only while you hold positions...
+  let atFinal = false;
+  if (open.length) {
+    gameStep += 1;
+    atFinal = gameStep > fmtG.totalSteps; // played full regulation -> settle
+    const clockTxt = atFinal ? 'Final' : fmtG.label(gameStep - 1);
+    for (const p of open) {
+      const cur = p.currentPriceCents ?? p.entryPriceCents;
+      const np = Math.max(1, Math.min(99, cur + Math.round((Math.random() * 2 - 1) * 5)));
+      await call('/api/price', { ticker: p.ticker, priceCents: np });
+      if (atFinal) await call('/api/settle', { id: p.id, outcome: Math.random() < np / 100 ? 'win' : 'loss' });
+      else await call('/api/gamestate', { id: p.id, gameState: clockTxt });
     }
+    setGameClock(clockTxt);
+    if (atFinal) gameStep = 0;
+  } else {
+    setGameClock('');
   }
-  setGameClock(clockTxt);
-  if (atFinal) gameStep = 0;
-  await call('/api/livegame/tick', sizing()); // advance the other live games too
+
+  // ...but ALWAYS advance the live-board games, so they play out even with no positions.
+  await call('/api/livegame/tick', sizing());
   await refresh();
-  return !atFinal;
+  // "still going" (for Run-to-final) = you had positions that haven't all settled yet
+  return open.length > 0 && !atFinal;
 }
 async function advanceOnce() { try { await gameTick(); } catch (e) { $('liveErr').textContent = e.message; } }
-function stopPlay() { if (playTimer) { clearInterval(playTimer); playTimer = null; } const b = $('playBtn'); if (b) b.textContent = '▶ Play'; }
+function stopPlay() { if (playTimer) { clearInterval(playTimer); playTimer = null; } document.querySelectorAll('.play-btn').forEach((b) => { b.textContent = '▶ Play'; }); }
 function playPause() {
   if (playTimer) { stopPlay(); return; }
-  $('playBtn').textContent = '⏸ Pause';
+  document.querySelectorAll('.play-btn').forEach((b) => { b.textContent = '⏸ Pause'; });
   const ms = $('speedSel') ? +$('speedSel').value : 3500;
-  playTimer = setInterval(() => gameTick().catch(() => stopPlay()), ms);
+  playTimer = setInterval(() => gameTick().catch(() => stopPlay()), ms); // runs until you pause
 }
 // Change speed live: if playing, restart the interval at the new pace.
 function setSpeed() { if (playTimer) { stopPlay(); playPause(); } }
