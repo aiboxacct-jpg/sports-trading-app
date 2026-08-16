@@ -28,22 +28,46 @@ let simHistory;   // SIMULATION decision history — kept SEPARATE from any live
 let missed;       // 👻 missed-opportunity ledger
 let liveBoard;    // 🔴 games "in progress" you can jump into (simulated; a live feed fills this later)
 
-// Simulated slate of in-progress games. Prices drift on refresh; game states are
-// illustrative until a real MLB feed is wired in.
-function defaultLiveBoard() {
-  return [
-    { id: 'lv-cubs', team: 'Cubs', opponent: 'Cardinals', ticker: 'LIVE-CUBS', priceCents: 58, step: 9, gameState: 'Bot 5', status: 'open' },
-    { id: 'lv-mets', team: 'Mets', opponent: 'Phillies', ticker: 'LIVE-METS', priceCents: 47, step: 11, gameState: 'Bot 6', status: 'open' },
-    { id: 'lv-lad', team: 'Dodgers', opponent: 'Padres', ticker: 'LIVE-LAD', priceCents: 66, step: 13, gameState: 'Bot 7', status: 'open' },
-    { id: 'lv-cle', team: 'Guardians', opponent: 'Tigers', ticker: 'LIVE-CLE', priceCents: 39, step: 6, gameState: 'Top 4', status: 'open' },
-    { id: 'lv-bal', team: 'Orioles', opponent: 'Rays', ticker: 'LIVE-BAL', priceCents: 52, step: 5, gameState: 'Bot 3', status: 'open' },
-  ];
-}
-
 // MLB inning label for a live-board step (0..17 = Top 1 .. Bot 9).
 function liveInningLabel(step) {
   const s = ((step % 18) + 18) % 18;
   return `${s % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(s / 2) + 1}`;
+}
+
+const MLB_TEAMS = [
+  'Yankees', 'Red Sox', 'Blue Jays', 'Rays', 'Orioles', 'Guardians', 'Tigers', 'Twins',
+  'White Sox', 'Royals', 'Astros', 'Mariners', 'Rangers', 'Angels', 'Athletics', 'Braves',
+  'Phillies', 'Mets', 'Marlins', 'Nationals', 'Brewers', 'Cubs', 'Cardinals', 'Reds',
+  'Pirates', 'Dodgers', 'Padres', 'Giants', 'Diamondbacks', 'Rockies',
+];
+
+// A random "daily slate" of in-progress games — varying count, matchups, innings and
+// prices — so each day feels different. Simulated until a real MLB feed is wired in.
+function generateLiveBoard() {
+  const teams = [...MLB_TEAMS];
+  for (let i = teams.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [teams[i], teams[j]] = [teams[j], teams[i]];
+  }
+  const games = 8 + Math.floor(Math.random() * 8); // 8..15 games
+  const board = [];
+  for (let i = 0; i < games && teams.length >= 2; i++) {
+    const team = teams.pop();
+    const opponent = teams.pop();
+    const step = Math.floor(Math.random() * 18);
+    const priceCents = 20 + Math.floor(Math.random() * 61); // 20..80
+    board.push({
+      id: `lv-${i}-${team}`,
+      team,
+      opponent,
+      ticker: `LIVE-${team.toUpperCase().replace(/\s+/g, '')}`,
+      priceCents,
+      step,
+      gameState: liveInningLabel(step),
+      status: 'open',
+    });
+  }
+  return board;
 }
 
 const saved = loadState(STATE_FILE);
@@ -51,13 +75,13 @@ if (saved && saved.engine) {
   engine = SimEngine.fromState(saved.engine);
   simHistory = Array.isArray(saved.simHistory) ? saved.simHistory : [];
   missed = Array.isArray(saved.missed) ? saved.missed : [];
-  liveBoard = Array.isArray(saved.liveBoard) && saved.liveBoard.length ? saved.liveBoard : defaultLiveBoard();
+  liveBoard = Array.isArray(saved.liveBoard) && saved.liveBoard.length ? saved.liveBoard : generateLiveBoard();
   console.log(`↺ restored state: ${engine.positions.length} positions, ${simHistory.length} decisions, ${missed.length} missed`);
 } else {
   engine = newEngine({ startingDollars: 100, targetDollars: 5 });
   simHistory = [];
   missed = [];
-  liveBoard = defaultLiveBoard();
+  liveBoard = generateLiveBoard();
 }
 
 // Random-walk the live prices so the board feels live between refreshes.
@@ -172,7 +196,7 @@ const api = {
     });
     simHistory.length = 0;
     missed.length = 0;
-    liveBoard = defaultLiveBoard();
+    liveBoard = generateLiveBoard();
     return { snapshot: engine.snapshot() };
   },
 
@@ -228,6 +252,12 @@ const api = {
 
   'POST /api/livegame/refresh': () => {
     driftLiveBoard();
+    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
+  },
+
+  // Pull a fresh random daily slate of live games.
+  'POST /api/livegame/new': () => {
+    liveBoard = generateLiveBoard();
     return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine() }) };
   },
 
@@ -303,7 +333,8 @@ const api = {
 // Routes that change state and must be persisted after handling.
 const MUTATING = new Set([
   '/api/reset', '/api/clear', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
-  '/api/missed/log', '/api/missed/resolve', '/api/missed/clear', '/api/livegame/refresh', '/api/livegame/tick',
+  '/api/missed/log', '/api/missed/resolve', '/api/missed/clear',
+  '/api/livegame/refresh', '/api/livegame/tick', '/api/livegame/new',
 ]);
 
 // ---- request routing ------------------------------------------------------

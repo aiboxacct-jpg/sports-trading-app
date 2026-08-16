@@ -160,6 +160,7 @@
       <div class="row" style="margin-bottom:10px">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="refreshLiveGames()">🔄 Refresh prices</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="newSlate()">🎲 New slate</button></div>
       </div>
       <div class="err" id="livegameErr"></div>
       <div id="livegameOut"><p class="muted">Hit "Rank live games" to scan games in progress.</p></div>
@@ -684,6 +685,10 @@ async function livegame() {
 }
 async function refreshLiveGames() {
   try { renderLiveGame((await call('/api/livegame/refresh', {})).livegame); }
+  catch (e) { $('livegameErr').textContent = e.message; }
+}
+async function newSlate() {
+  try { renderLiveGame((await call('/api/livegame/new', {})).livegame); await refresh(); }
   catch (e) { $('livegameErr').textContent = e.message; }
 }
 function renderLiveGame(pg) {
