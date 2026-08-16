@@ -29,8 +29,9 @@
   .kpis b { font-size: 17px; }
   .targetbox { border-left: 1px solid var(--line); padding-left: 18px; min-width: 210px; }
   .targetbox small { color: var(--muted); font-size: 11px; }
-  .stakebox { border-left: 1px solid var(--line); padding-left: 18px; }
-  .stakebox small { color: var(--muted); font-size: 11px; }
+  .leftcol { display: flex; flex-direction: column; gap: 6px; }
+  .stakebox { display: flex; align-items: center; gap: 6px; }
+  .stakebox small { color: var(--muted); font-size: 11px; margin-right: 4px; }
   .targetbox .state { font-weight: 800; font-size: 15px; }
   .state.NOTREACHED { color: var(--muted); }
   .state.AVAILABLE { color: var(--warn); }
@@ -96,23 +97,23 @@
 
 <!-- PINNED STATE — always in front of you -->
 <div class="strip">
-  <div class="kpis">
-    <div><small>Cash</small><b id="cash">—</b></div>
-    <div><small>Committed</small><b id="committed">—</b></div>
-    <div><small>Unrealized P/P</small><b id="unreal">—</b></div>
-    <div><small>Realized P/P</small><b id="real">—</b></div>
+  <div class="leftcol">
+    <div class="kpis">
+      <div><small>Cash</small><b id="cash">—</b></div>
+      <div><small>Committed</small><b id="committed">—</b></div>
+      <div><small>Unrealized P/P</small><b id="unreal">—</b></div>
+      <div><small>Realized P/P</small><b id="real">—</b></div>
+    </div>
+    <div class="stakebox">
+      <small>Stake / pick</small>
+      <span style="font-weight:800">$</span><input id="rStake" type="number" value="1" step="0.5" min="0.1" style="width:60px;font-weight:700" onchange="onStakeChange()" />
+      <select id="sizeMode" style="width:auto" onchange="onStakeChange()"><option value="fixed">Fixed stake</option><option value="target">Size to +target</option></select>
+    </div>
   </div>
   <div class="targetbox">
     <small>Target <span id="targetAmt"></span></small>
     <div class="state" id="targetState">—</div>
     <div class="alert" id="targetAlert"></div>
-  </div>
-  <div class="stakebox">
-    <small>Stake / pick</small>
-    <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
-      <span style="font-weight:800">$</span><input id="rStake" type="number" value="1" step="0.5" min="0.1" style="width:64px;font-weight:700" onchange="onStakeChange()" />
-      <select id="sizeMode" style="width:auto" onchange="onStakeChange()"><option value="fixed">Fixed stake</option><option value="target">Size to +target</option></select>
-    </div>
   </div>
   <div class="setup">
     start $<input id="startDollars" type="number" value="100" />
