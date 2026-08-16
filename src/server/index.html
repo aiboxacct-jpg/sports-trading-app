@@ -84,6 +84,10 @@
   .rankrow:hover { background: #eef2f7; }
   .err { color: var(--bad); font-size: 12px; min-height: 15px; margin-top: 6px; }
   .status-open { color: var(--warn); } .status-closed { color: var(--muted); } .status-settled { color: var(--good); }
+  @keyframes blinkred { 0%, 100% { background: transparent; } 50% { background: #ffdede; } }
+  tr.approaching { animation: blinkred 1s ease-in-out infinite; }
+  tr.approaching td:first-child { border-left: 3px solid var(--bad); }
+  .nearflag { color: var(--bad); font-weight: 700; font-size: 11px; }
   .summary { font-size: 14px; margin-bottom: 8px; }
 </style>
 </head>
@@ -290,9 +294,12 @@ function renderSnapshot(snap) {
   $('posBody').innerHTML = open.length ? open.map((p) => {
     const now = p.currentPriceCents ?? p.entryPriceCents;
     const payoutX = Math.round((100 / now) * 10) / 10; // live payout multiple at the current price
-    return `<tr>
+    // pulse red when this position's unrealized profit is closing in on the target
+    const up = p.unrealizedPureProfitCents;
+    const near = up != null && t.targetCents > 0 && up >= 0.7 * t.targetCents && up < t.targetCents;
+    return `<tr class="${near ? 'approaching' : ''}">
       <td>${p.team ?? p.ticker}${p.opponent ? ' vs ' + p.opponent : ''}
-        <span class="status-open">[open]</span><br>
+        <span class="status-open">[open]</span>${near ? ' <span class="nearflag">🔴 near target</span>' : ''}<br>
         <span class="muted" style="font-size:11px">${p.ticker} · ${p.contracts}× · ${p.kind}</span></td>
       <td>${p.entryPriceCents}¢</td>
       <td><input id="gs-${p.id}" value="${(p.currentGameState ?? '').replace(/"/g,'&quot;')}" placeholder="Top 5, 2 out" style="width:120px">
