@@ -824,8 +824,10 @@ function renderLiveGame(pg) {
 const esc = (v) => String(v ?? '').replace(/"/g, '&quot;');
 function stageRow(p) {
   const tr = document.createElement('tr');
+  tr.dataset.gameState = p.gameState || ''; // carry the inning through to Open
+  const gs = p.gameState ? `<div class="muted" style="font-size:10px">🔴 ${esc(p.gameState)}</div>` : '';
   tr.innerHTML = `
-    <td><input class="s-team" value="${esc(p.team)}" style="width:110px"></td>
+    <td><input class="s-team" value="${esc(p.team)}" style="width:110px">${gs}</td>
     <td><input class="s-opp" value="${esc(p.opponent)}" style="width:110px"></td>
     <td><input class="s-ticker" value="${esc(p.ticker || p.team)}" style="width:120px"></td>
     <td><select class="s-kind"><option${p.kind !== 'combo' ? ' selected' : ''}>single</option><option${p.kind === 'combo' ? ' selected' : ''}>combo</option></select></td>
@@ -888,6 +890,7 @@ async function openRowFrom(tr) {
     kind: tr.querySelector('.s-kind').value,
     priceCents: +tr.querySelector('.s-price').value,
     stakeDollars: +tr.querySelector('.s-stake').value,
+    gameState: tr.dataset.gameState || null,
   });
 }
 async function openStaged(btn) {
