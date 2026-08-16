@@ -4,6 +4,9 @@ node_modules/
 !.env.example
 *.pem
 *.key
+My Keys.txt
+*secret*
+*Keys*.txt
 *.log
 .DS_Store
 data/*.db
