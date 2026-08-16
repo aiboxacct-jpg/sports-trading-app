@@ -147,6 +147,8 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical, st
     kind,
     verified: cand.verified ?? false, // 🟢 real Kalshi price vs ⚪ simulated/entered
     source: cand.source ?? null,      // e.g. 'KALSHI'
+    live: cand.live ?? false,         // 🔴 game in progress right now
+    startTime: cand.startTime ?? null,
     gameTime: cand.gameTime ?? null,
     gameState: cand.gameState ?? null,
     priceCents,
@@ -241,7 +243,7 @@ export function buildPreGameReport(snapshot, board, { feeRate, historical, stake
     },
     quickBoard: ranked.map((r) => ({
       rank: r.rank, medal: r.medal, team: r.team, opponent: r.opponent, kind: r.kind,
-      ticker: r.ticker, verified: r.verified, source: r.source,
+      ticker: r.ticker, verified: r.verified, source: r.source, live: r.live, startTime: r.startTime,
       priceCents: r.priceCents, marketProbabilityPct: r.marketProbabilityPct,
       payoutMultiple: r.payoutMultiple, legs: r.legs,
       edgePct: r.edgePct, evCents: r.evCents, estProbPct: r.estProbPct, historicallyInformed: r.historicallyInformed,

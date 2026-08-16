@@ -42,13 +42,22 @@ let liveCache = { at: 0, board: [] };
 
 // Map Kalshi's grouped MLB games into board candidates (one per priced team side),
 // tagged verified + source so the UI can badge them 🟢 and never confuse them with sim.
+const LIVE_PLAY_WINDOW_MS = 4 * 3600e3; // a game is "in progress" for ~4h after first pitch
+
 function mlbGamesToCandidates(games) {
+  const now = Date.now();
   const board = [];
   for (const g of games) {
     for (const s of g.sides) {
       if (s.priceCents == null) continue; // never invent a price
       const other = g.sides.find((x) => x.ticker !== s.ticker);
       const tradeable = s.status === 'active' || s.status === 'open';
+      // "Live now" heuristic from Kalshi data alone: first pitch has passed, the market
+      // is still open, and we're inside the typical play window. Real inning/score comes
+      // with the MLB feed (Phase 2). null start time => unknown, treat as not-yet-live.
+      const startMs = s.occurrenceTime ? Date.parse(s.occurrenceTime) : NaN;
+      const started = Number.isFinite(startMs) && startMs <= now;
+      const live = started && tradeable && (now - startMs <= LIVE_PLAY_WINDOW_MS);
       board.push({
         id: s.ticker,
         team: s.team,
@@ -56,7 +65,9 @@ function mlbGamesToCandidates(games) {
         ticker: s.ticker,
         kind: 'single',
         priceCents: s.priceCents,
-        gameState: null, // live game state (inning) arrives in a later phase
+        gameState: live ? '🔴 LIVE' : null, // real inning/score arrives with the MLB feed
+        live,
+        startTime: s.occurrenceTime ?? null,
         status: tradeable ? 'open' : (s.status ?? 'open'),
         verified: true,
         source: 'KALSHI',

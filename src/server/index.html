@@ -99,6 +99,12 @@
   tr.approaching td:first-child { border-left: 3px solid var(--bad); }
   .nearflag { color: var(--bad); font-weight: 700; font-size: 11px; }
   .summary { font-size: 14px; margin-bottom: 8px; }
+  @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  .live-badge { display: inline-block; background: var(--bad); color: #fff; font-size: 10px;
+    font-weight: 800; padding: 1px 7px; border-radius: 99px; letter-spacing: .06em;
+    animation: livepulse 1.1s ease-in-out infinite; }
+  .live-count { color: var(--bad); font-weight: 800; animation: livepulse 1.1s ease-in-out infinite; }
+  .upcoming { color: var(--muted); font-size: 11px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -194,9 +200,10 @@
     <div class="body">
       <div class="row" style="margin-bottom:10px">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
+        <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
+        <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="refreshLiveGames()">🔄 Refresh prices</button></div>
+        <div class="live-only" style="flex:0 0 auto;display:none"><label>&nbsp;</label><button class="sm" id="autoLiveBtn" onclick="toggleAutoLive()">▶ Auto-refresh live</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="newSlate()">🎲 New slate</button></div>
       </div>
       <div class="err" id="livegameErr"></div>
@@ -219,21 +226,24 @@
       <div id="replacements"></div>
 
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <b style="font-size:12px">Simulate game:</b>
-        <select id="sportSel" style="width:auto"><option value="MLB">MLB (9 innings)</option><option value="NHL">NHL (3 periods)</option></select>
-        <select id="speedSel" style="width:auto" title="play speed" onchange="setSpeed()">
-          <option value="2000">Fast · 2s</option>
-          <option value="3500" selected>Normal · 3.5s</option>
-          <option value="6000">Slow · 6s</option>
-          <option value="10000">Very slow · 10s</option>
-        </select>
-        <button class="sm play-btn" id="playBtn" onclick="playPause()">▶ Play</button>
-        <button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button>
-        <button class="sm ghost" onclick="simulateToFinal()">🏁 Run to final</button>
-        <b id="gameClock" style="font-size:13px;color:var(--bad)"></b>
+        <div class="sim-only" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <b style="font-size:12px">Simulate game:</b>
+          <select id="sportSel" style="width:auto"><option value="MLB">MLB (9 innings)</option><option value="NHL">NHL (3 periods)</option></select>
+          <select id="speedSel" style="width:auto" title="play speed" onchange="setSpeed()">
+            <option value="2000">Fast · 2s</option>
+            <option value="3500" selected>Normal · 3.5s</option>
+            <option value="6000">Slow · 6s</option>
+            <option value="10000">Very slow · 10s</option>
+          </select>
+          <button class="sm play-btn" id="playBtn" onclick="playPause()">▶ Play</button>
+          <button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button>
+          <button class="sm ghost" onclick="simulateToFinal()">🏁 Run to final</button>
+          <b id="gameClock" style="font-size:13px;color:var(--bad)"></b>
+        </div>
+        <span class="live-only muted" style="font-size:12px;display:none">🔴 Live mode — real games decide the outcome; use “🔄 Update (u)” or Auto-refresh above. (Simulation controls are in ⚪ Simulation mode.)</span>
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:auto"><input type="checkbox" id="autoLockCb" style="width:auto" onchange="toggleAutoLock()"> 🔒 Auto-lock at target</label>
       </div>
-      <div class="muted" style="font-size:12px;margin-top:2px">plays the full game clock; each step advances an inning/period and drifts prices</div>
+      <div class="sim-only muted" style="font-size:12px;margin-top:2px">plays the full game clock; each step advances an inning/period and drifts prices</div>
 
       <div style="margin-top:12px">
         <div style="font-weight:700;font-size:12px;color:var(--muted)">Your decision <span style="font-weight:400">(click a number)</span></div>
@@ -289,8 +299,12 @@ async function applyMode() {
   const s = $('modeSim'), l = $('modeLive'), banner = $('liveBanner');
   if (s) s.classList.toggle('active', appMode === 'sim');
   if (l) l.classList.toggle('active', appMode === 'live');
-  // Hide simulation-only clock controls in live mode (real games don't take a fake clock).
+  // Hide simulation-only clock controls in live mode (real games don't take a fake clock),
+  // and reveal live-only controls (auto-refresh) instead.
   document.querySelectorAll('.sim-only').forEach((b) => { b.style.display = isLive() ? 'none' : ''; });
+  document.querySelectorAll('.live-only').forEach((b) => { b.style.display = isLive() ? '' : 'none'; });
+  if (!isLive()) stopAutoLive();
+  if (isLive()) stopPlay(); // never leave a sim clock running in live mode
   if (!banner) return;
   if (!isLive()) { banner.style.display = 'none'; return; }
   banner.style.display = '';
@@ -548,6 +562,20 @@ function playPause() {
 }
 // Change speed live: if playing, restart the interval at the new pace.
 function setSpeed() { if (playTimer) { stopPlay(); playPause(); } }
+
+// LIVE mode auto-refresh: gently re-pull real Kalshi prices on a timer (no simulation,
+// never settles positions). Distinct from the simulation "Play" clock.
+let autoLiveTimer = null;
+function stopAutoLive() {
+  if (autoLiveTimer) { clearInterval(autoLiveTimer); autoLiveTimer = null; }
+  const b = $('autoLiveBtn'); if (b) b.textContent = '▶ Auto-refresh live';
+}
+function toggleAutoLive() {
+  if (autoLiveTimer) { stopAutoLive(); return; }
+  const b = $('autoLiveBtn'); if (b) b.textContent = '⏸ Stop auto-refresh';
+  refresh();
+  autoLiveTimer = setInterval(() => refresh().catch(() => {}), 12000);
+}
 async function simulateToFinal() {
   stopPlay();
   for (let i = 0; i < 500; i++) {
@@ -864,9 +892,14 @@ function renderLiveGame(pg) {
   const live = pg.mode === 'LIVE';
   const edge = live ? 'var(--good)' : 'var(--bad)';
   let html = `<div style="border:1px solid var(--line);border-left:4px solid ${edge};border-radius:8px;padding:14px;background:#fff">`;
+  const liveCount = live ? pg.actionRanking.filter((it) => it.live).length : 0;
   if (live) {
     const asOf = pg.asOf ? new Date(pg.asOf).toLocaleTimeString() : '';
     html += `<div style="font-weight:800;margin-bottom:6px">🟢 LIVE GAME BOARD <span class="muted" style="font-weight:500">— real Kalshi prices (${pg.base || 'PRODUCTION'}, read-only)${pg.priced != null ? ' · ' + pg.priced + ' markets' : ''}${asOf ? ' · as of ' + asOf : ''}</span></div>`;
+    // Blinking count of games actually in progress right now.
+    html += liveCount
+      ? `<div style="margin:2px 0 6px"><span class="live-badge">🔴 LIVE</span> <span class="live-count">${liveCount} game${liveCount === 1 ? '' : 's'} in progress now</span> <span class="muted" style="font-size:11px">— based on first-pitch time; real inning/score in Phase 2</span></div>`
+      : `<div style="margin:2px 0 6px" class="muted" style="font-size:12px">⏰ No games live yet — upcoming games show their start time.</div>`;
   } else {
     html += '<div style="font-weight:800;margin-bottom:6px">🔴 LIVE GAME BOARD <span class="muted" style="font-weight:500">— ⚪ simulation; prices drift on refresh, game states illustrative</span></div>';
   }
@@ -875,12 +908,18 @@ function renderLiveGame(pg) {
     '<button class="sm" onclick="openSelectedNow()">⚡ Open selected now</button>' +
     '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button></div>';
   if (!pg.actionRanking.length) html += '<p class="muted">No live games right now.</p>';
-  pg.actionRanking.forEach((it, i) => {
+  // Live games first so they're front-and-center.
+  const rows = live ? [...pg.actionRanking].sort((a, b) => (b.live === true) - (a.live === true)) : pg.actionRanking;
+  rows.forEach((it) => {
+    const i = pg.actionRanking.indexOf(it);
     const badge = it.verified ? '<span title="real Kalshi price">🟢</span> ' : '';
+    const startTxt = it.startTime ? new Date(it.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    const stateChip = it.live
+      ? '<span class="live-badge">🔴 LIVE</span>'
+      : (startTxt ? `<span class="upcoming">⏰ ${startTxt}</span>` : '');
     html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="togglePick(this)">
-        <div>${badge}<span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
+        <div>${badge}<span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''} ${stateChip}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
-        ${it.gameState ? `<div style="font-size:12px;color:var(--bad)">🔴 ${it.gameState}</div>` : ''}
         <div class="why">${it.why}</div>
         ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}
         <div style="font-size:12px">→ ${it.action}</div>
