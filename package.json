@@ -11,7 +11,8 @@
     "start": "node src/server/server.js",
     "test": "node --test",
     "demo": "node examples/demo.js",
-    "rank": "node examples/rankingDemo.js"
+    "rank": "node examples/rankingDemo.js",
+    "kalshi:ping": "node examples/kalshiPing.js"
   },
   "author": "",
   "license": "UNLICENSED"
