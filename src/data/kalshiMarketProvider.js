@@ -100,11 +100,19 @@ export class KalshiMarketProvider extends MarketProvider {
     this.privateKeyPem = loadPrivateKey({ privateKeyPem, privateKeyPath });
     this.baseUrl = baseUrl ?? process.env.KALSHI_BASE_URL ?? KALSHI_PROD;
     this.prices = new Map(); // ticker -> last known price cents (from fetches)
+    this.lastServerTimeMs = null; // authoritative "now" from Kalshi's HTTP Date header
   }
 
   get source() { return 'KALSHI'; }
   get verified() { return this.isConfigured; }
   get isConfigured() { return Boolean(this.apiKeyId && this.privateKeyPem); }
+
+  /**
+   * Best-known current time in ms. Prefers Kalshi's server clock (from the last response's
+   * Date header) over the local clock, which may be wrong on the host machine — that skew
+   * is exactly what made a live game look "not started yet".
+   */
+  serverNow() { return this.lastServerTimeMs ?? Date.now(); }
 
   /** Sync price accessor for the engine — returns cached value or null (NOT VERIFIED). */
   getPrice(ticker) {
@@ -131,6 +139,8 @@ export class KalshiMarketProvider extends MarketProvider {
         'Content-Type': 'application/json',
       },
     });
+    const dateHeader = res.headers.get('date');
+    if (dateHeader) { const t = Date.parse(dateHeader); if (!Number.isNaN(t)) this.lastServerTimeMs = t; }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(`Kalshi ${method} ${endpoint} → ${res.status} ${body}`.slice(0, 300));
@@ -188,7 +198,7 @@ export class KalshiMarketProvider extends MarketProvider {
       });
     }
     if (withinHoursAhead != null) {
-      const now = Date.now();
+      const now = this.serverNow();
       const lo = now - withinHoursBehind * 3600e3;
       const hi = now + withinHoursAhead * 3600e3;
       games = games.filter((g) => {

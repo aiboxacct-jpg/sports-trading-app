@@ -892,13 +892,16 @@ function renderLiveGame(pg) {
   const live = pg.mode === 'LIVE';
   const edge = live ? 'var(--good)' : 'var(--bad)';
   let html = `<div style="border:1px solid var(--line);border-left:4px solid ${edge};border-radius:8px;padding:14px;background:#fff">`;
-  const liveCount = live ? pg.actionRanking.filter((it) => it.live).length : 0;
+  // Count distinct matchups (each game appears as two team rows), not rows.
+  const liveCount = live
+    ? new Set(pg.actionRanking.filter((it) => it.live).map((it) => [it.team, it.opponent].sort().join('|'))).size
+    : 0;
   if (live) {
     const asOf = pg.asOf ? new Date(pg.asOf).toLocaleTimeString() : '';
     html += `<div style="font-weight:800;margin-bottom:6px">🟢 LIVE GAME BOARD <span class="muted" style="font-weight:500">— real Kalshi prices (${pg.base || 'PRODUCTION'}, read-only)${pg.priced != null ? ' · ' + pg.priced + ' markets' : ''}${asOf ? ' · as of ' + asOf : ''}</span></div>`;
     // Blinking count of games actually in progress right now.
     html += liveCount
-      ? `<div style="margin:2px 0 6px"><span class="live-badge">🔴 LIVE</span> <span class="live-count">${liveCount} game${liveCount === 1 ? '' : 's'} in progress now</span> <span class="muted" style="font-size:11px">— based on first-pitch time; real inning/score in Phase 2</span></div>`
+      ? `<div style="margin:2px 0 6px"><span class="live-badge">🔴 LIVE</span> <span class="live-count">${liveCount} game${liveCount === 1 ? '' : 's'} in progress now</span> <span class="muted" style="font-size:11px">— live inning &amp; score from MLB</span></div>`
       : `<div style="margin:2px 0 6px" class="muted" style="font-size:12px">⏰ No games live yet — upcoming games show their start time.</div>`;
   } else {
     html += '<div style="font-weight:800;margin-bottom:6px">🔴 LIVE GAME BOARD <span class="muted" style="font-weight:500">— ⚪ simulation; prices drift on refresh, game states illustrative</span></div>';
@@ -914,9 +917,10 @@ function renderLiveGame(pg) {
     const i = pg.actionRanking.indexOf(it);
     const badge = it.verified ? '<span title="real Kalshi price">🟢</span> ' : '';
     const startTxt = it.startTime ? new Date(it.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
-    const stateChip = it.live
-      ? '<span class="live-badge">🔴 LIVE</span>'
-      : (startTxt ? `<span class="upcoming">⏰ ${startTxt}</span>` : '');
+    let stateChip = '';
+    if (it.live) stateChip = `<span class="live-badge">🔴 ${it.gameState || 'LIVE'}</span>`;
+    else if (it.gameState && /Final/.test(it.gameState)) stateChip = `<span class="upcoming">🏁 ${it.gameState}</span>`;
+    else if (startTxt) stateChip = `<span class="upcoming">⏰ ${startTxt}</span>`;
     html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="togglePick(this)">
         <div>${badge}<span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''} ${stateChip}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>

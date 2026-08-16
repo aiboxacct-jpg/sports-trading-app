@@ -23,6 +23,7 @@ import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
 import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO } from '../data/kalshiMarketProvider.js';
+import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr } from '../data/mlbLiveFeed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
@@ -44,8 +45,7 @@ let liveCache = { at: 0, board: [] };
 // tagged verified + source so the UI can badge them 🟢 and never confuse them with sim.
 const LIVE_PLAY_WINDOW_MS = 4 * 3600e3; // a game is "in progress" for ~4h after first pitch
 
-function mlbGamesToCandidates(games) {
-  const now = Date.now();
+function mlbGamesToCandidates(games, now = Date.now()) {
   const board = [];
   for (const g of games) {
     for (const s of g.sides) {
@@ -77,6 +77,30 @@ function mlbGamesToCandidates(games) {
   return board;
 }
 
+// Overlay authoritative MLB game state (live?/inning/score) onto the Kalshi board.
+// MLB StatsAPI wins over the unreliable Kalshi scheduled-start heuristic; if it's
+// unreachable we silently keep the heuristic so the board still works.
+async function annotateLive(board, nowMs) {
+  let games;
+  try { games = await fetchLiveGames(etDateStr(nowMs)); }
+  catch { return; }
+  for (const c of board) {
+    const g = findGameFor(games, nickFromKalshi(c.team), nickFromKalshi(c.opponent));
+    if (!g) continue;
+    c.mlbMatched = true;
+    if (g.state === 'Live') {
+      c.live = true;
+      c.gameState = `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
+    } else if (g.state === 'Final') {
+      c.live = false;
+      c.gameState = `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
+    } else {
+      c.live = false; // Preview / scheduled — not started yet, keep the start time
+      c.gameState = null;
+    }
+  }
+}
+
 async function liveMlbBoard({ force = false } = {}) {
   const now = Date.now();
   if (!force && now - liveCache.at < LIVE_TTL_MS && liveCache.board.length) return liveCache.board;
@@ -84,7 +108,8 @@ async function liveMlbBoard({ force = false } = {}) {
   const games = await kalshiProvider().listMlbGames({
     status: 'open', limit: 300, withinHoursBehind: 6, withinHoursAhead: 20,
   });
-  const board = mlbGamesToCandidates(games);
+  const board = mlbGamesToCandidates(games, kalshiProvider().serverNow());
+  await annotateLive(board, kalshiProvider().serverNow());
   liveCache = { at: now, board };
   return board;
 }
