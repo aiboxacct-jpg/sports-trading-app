@@ -69,24 +69,32 @@ Browser (dashboard)  ──HTTP──▶  Node server (holds secrets, proxies)
 
 ## Phased roadmap
 
-| Phase | Goal | Notes |
+| Phase | Goal | Status / Notes |
 |------|------|-------|
-| **0. Connectivity** | Kalshi auth signing works; one real price fetch returns verified data | RSA-PSS signing is the make-or-break; prove it in isolation first |
-| **1. Live MLB prices** | Real Kalshi MLB prices in the board, `🟢 VERIFIED` badges, `NOT VERIFIED` fallback | Read-only; no game state yet |
+| **0. Connectivity** | Kalshi auth signing works; one real fetch returns verified data | ✅ **Built** — signing + `npm run kalshi:ping`; awaiting user's demo keys to verify |
+| **1. Live MLB prices** (Live Play, paper) | Real Kalshi MLB prices on the board, `🟢 VERIFIED` badges, `NOT VERIFIED` fallback | **NEXT** — read-only; play money; no game state yet |
 | **2. Live MLB game state** | MLB StatsAPI wired: real inning/score/outs on positions & board | Replaces the simulated clock for MLB |
-| **3. Position tracking** | Track the positions you've entered against live prices → real P&L, target, auto-lock alerts | User-entered first; optional Kalshi-portfolio auto-sync later |
-| **4. Live engine + history** | Separate LiveEngine + live history; live/sim toggle in the UI | Honors the sim-vs-live separation rule |
+| **3. Order prep + hand-off** | App shows the exact order and deep-links you to that Kalshi market — **you place & approve it on Kalshi** | Real money, manual on Kalshi's side. NO in-app order submission, ever |
+| **4. Live engine + history** | Separate LiveEngine + live history; the Sim/Live toggle drives real data | Honors the sim-vs-live separation rule |
 | **5. Multi-sport** | NHL via NHL API; football via a paid/unofficial feed | Sport config + matcher per sport |
+| **— Live Tracking** (parked) | Auto-sync your real Kalshi portfolio (positions/fills) for hands-off P&L | Deferred at user's request; revisit later |
 
-## Open questions (these shape everything)
+## Decisions (locked)
 
-1. **Kalshi credentials** — do you have an account + API key (id + RSA key)?
-2. **Live-mode posture** — read-only info + your P&L tracking (recommended), or something
-   more? (The app still won't place orders either way.)
-3. **First sport + data source** — MLB via the free StatsAPI first? Football will likely
-   need a paid feed — worth deciding before we lean on it.
-4. **Deployment/secrets** — run locally with a `.env`, or deploy (e.g., Render) with
-   managed secrets?
+- **No in-app trade execution — ever.** The app never submits real-money orders. Even
+  with per-order manual approval, code that POSTs orders to Kalshi is off the table.
+  Real bets are placed by the user, on Kalshi's own app/site (Phase 3 hands off to it).
+- **Live-mode posture:** read-only info + your P&L. Rankings on live markets are framed
+  as analysis, not "place this bet."
+- **First sport / source:** MLB via the free StatsAPI. Football later (likely paid).
+- **Deployment:** local first, `.env` for secrets. Demo (paper) Kalshi before production.
+
+## Risks / unknowns
+- Kalshi RSA signing correctness and rate limits.
+- Kalshi market ↔ game matching (naming, doubleheaders, postponements).
+- Football data licensing/cost.
+- Keeping the advice framing right on live real-money markets.
+- Polling vs websockets for freshness (start with polling on Update/interval).
 
 ## Risks / unknowns
 - Kalshi RSA signing correctness and rate limits.
