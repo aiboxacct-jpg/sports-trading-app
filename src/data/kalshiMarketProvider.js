@@ -22,6 +22,52 @@ import { MarketProvider } from './marketProvider.js';
 export const KALSHI_PROD = 'https://api.elections.kalshi.com/trade-api/v2';
 export const KALSHI_DEMO = 'https://external-api.demo.kalshi.co/trade-api/v2';
 
+/** Kalshi's MLB "game winner" series (each event = one game, one market per team side). */
+export const KALSHI_MLB_SERIES = 'KXMLBGAME';
+
+/**
+ * Kalshi's v2 API returns money as dollar STRINGS ("0.4700"), not integer cents.
+ * Convert to integer cents; return null for missing/blank so we never invent a price.
+ */
+export function dollarsToCents(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n * 100) : null;
+}
+
+/**
+ * Normalize a raw Kalshi market into the fields the app cares about, in integer cents.
+ * Reads the `*_dollars` fields (current API), falling back to legacy integer-cent fields.
+ * bid/ask/last are the YES side; a null price means NOT VERIFIED, never a guess.
+ */
+export function normalizeMarket(m) {
+  // A real Kalshi quote sits in 1..99¢. 0 or 100 are placeholders ("no bid" / "no ask"
+  // / "no trade yet") — treat those as absent so we never show an invented price.
+  const real = (c) => (c != null && c >= 1 && c <= 99 ? c : null);
+  const bid = real(dollarsToCents(m.yes_bid_dollars) ?? m.yes_bid);
+  const ask = real(dollarsToCents(m.yes_ask_dollars) ?? m.yes_ask);
+  const last = real(dollarsToCents(m.last_price_dollars) ?? m.last_price);
+  const mid = bid != null && ask != null ? Math.round((bid + ask) / 2) : null;
+  const volume = Number(m.volume_fp ?? m.volume ?? 0) || 0;
+  return {
+    ticker: m.ticker,
+    eventTicker: m.event_ticker ?? null,
+    title: m.title ?? null,
+    team: m.yes_sub_title ?? null, // the YES side this market pays on
+    status: m.status ?? null,
+    bidCents: bid,
+    askCents: ask,
+    lastCents: last,
+    midCents: mid,
+    // Best single "price" to show: last trade, else the two-sided mid, else the bid.
+    priceCents: last ?? mid ?? bid ?? null,
+    volume,
+    // Genuine tradeable market: either it has traded, or it shows a real two-sided quote.
+    hasLiquidity: volume > 0 || (bid != null && ask != null),
+    closeTime: m.close_time ?? m.expected_expiration_time ?? null,
+  };
+}
+
 const NOT_CONFIGURED =
   '🔴 NOT VERIFIED — Kalshi live provider is not configured. Add KALSHI_API_KEY_ID and a ' +
   'private key (KALSHI_PRIVATE_KEY or KALSHI_PRIVATE_KEY_PATH). See KALSHI_SETUP.md.';
@@ -110,12 +156,36 @@ export class KalshiMarketProvider extends MarketProvider {
     return market;
   }
 
+  /**
+   * List MLB "game winner" markets, grouped into games. Each game pairs the two team
+   * sides (home/away) with real YES prices in cents and a VERIFIED flag when priced.
+   */
+  async listMlbGames({ status = 'open', limit = 200 } = {}) {
+    const markets = await this.listMarkets({ seriesTicker: KALSHI_MLB_SERIES, status, limit });
+    const byEvent = new Map();
+    for (const raw of markets) {
+      const m = normalizeMarket(raw);
+      if (!m.eventTicker) continue;
+      if (!byEvent.has(m.eventTicker)) byEvent.set(m.eventTicker, []);
+      byEvent.get(m.eventTicker).push(m);
+    }
+    const games = [];
+    for (const [eventTicker, sides] of byEvent) {
+      games.push({
+        eventTicker,
+        title: sides[0]?.title ?? null,
+        closeTime: sides[0]?.closeTime ?? null,
+        sides, // one entry per team, each with team/priceCents/bid/ask/verified
+        // A game is "priced" only if at least one side has a real (non-placeholder) quote.
+        priced: sides.some((s) => s.hasLiquidity && s.priceCents != null),
+      });
+    }
+    return games;
+  }
+
   #cache(market) {
-    // Kalshi prices are integer cents (1..99). Prefer last_price, fall back to the mid.
-    const price = market.last_price ?? (market.yes_bid != null && market.yes_ask != null
-      ? Math.round((market.yes_bid + market.yes_ask) / 2)
-      : market.yes_bid ?? null);
-    if (market.ticker && price != null) this.prices.set(market.ticker, price);
+    const { ticker, priceCents } = normalizeMarket(market);
+    if (ticker && priceCents != null) this.prices.set(ticker, priceCents);
   }
 }
 

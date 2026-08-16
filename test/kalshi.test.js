@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
-import { signKalshi, KalshiMarketProvider } from '../src/data/kalshiMarketProvider.js';
+import { signKalshi, KalshiMarketProvider, dollarsToCents, normalizeMarket } from '../src/data/kalshiMarketProvider.js';
 
 const pssVerify = (publicKey, msg, sigB64) =>
   crypto.verify('sha256', Buffer.from(msg), {
@@ -38,4 +38,43 @@ test('configured Kalshi provider reports verified + ready to sign', () => {
   assert.equal(k.isConfigured, true);
   assert.equal(k.verified, true);
   assert.equal(k.source, 'KALSHI');
+});
+
+test('dollarsToCents parses the API dollar strings, never invents on blanks', () => {
+  assert.equal(dollarsToCents('0.4700'), 47);
+  assert.equal(dollarsToCents('1.0000'), 100);
+  assert.equal(dollarsToCents('0.0100'), 1);
+  assert.equal(dollarsToCents(''), null);
+  assert.equal(dollarsToCents(null), null);
+  assert.equal(dollarsToCents(undefined), null);
+});
+
+test('normalizeMarket reads *_dollars fields into cents and picks a sane price', () => {
+  const m = normalizeMarket({
+    ticker: 'KXMLBGAME-X-LAD', event_ticker: 'KXMLBGAME-X', title: 'LAD vs COL Winner?',
+    yes_sub_title: 'Los Angeles D', status: 'active',
+    yes_bid_dollars: '0.4500', yes_ask_dollars: '0.4900', last_price_dollars: '0.4700',
+    volume_fp: '12.00',
+  });
+  assert.equal(m.team, 'Los Angeles D');
+  assert.equal(m.bidCents, 45);
+  assert.equal(m.askCents, 49);
+  assert.equal(m.lastCents, 47);
+  assert.equal(m.midCents, 47);
+  assert.equal(m.priceCents, 47); // prefers last trade
+  assert.equal(m.hasLiquidity, true);
+});
+
+test('normalizeMarket treats 0/100 placeholders as absent (no invented price)', () => {
+  // Demo-style row: no trade (0), no ask (100), only a bid — price falls back to bid.
+  const m = normalizeMarket({
+    ticker: 'T', event_ticker: 'E', yes_sub_title: 'A',
+    yes_bid_dollars: '0.5300', yes_ask_dollars: '1.0000', last_price_dollars: '0.0000',
+    volume_fp: '0.00',
+  });
+  assert.equal(m.lastCents, null); // 0 => no trade yet
+  assert.equal(m.askCents, null);  // 100 => no real ask
+  assert.equal(m.bidCents, 53);
+  assert.equal(m.priceCents, 53);  // falls through to the bid
+  assert.equal(m.hasLiquidity, false); // vol 0 and not two-sided
 });
