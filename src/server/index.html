@@ -108,9 +108,10 @@
   <div class="setup">
     start $<input id="startDollars" type="number" value="100" />
     target $<input id="targetDollars" type="number" value="5" />
+    <button class="sm" onclick="newGame()">🎮 New game</button>
     <button class="ghost sm" onclick="reset()">Reset</button>
     <button class="ghost sm" onclick="clearAll()">🧹 Clear all</button>
-    <button class="sm" onclick="refresh()">🔄 Update (u)</button>
+    <button class="ghost sm" onclick="refresh()">🔄 Update (u)</button>
     <span id="updatedAt"></span>
   </div>
 </div>
@@ -699,6 +700,15 @@ async function refreshLiveGames() {
 async function newSlate() {
   try { renderLiveGame((await call('/api/livegame/new', sizing())).livegame); await refresh(); }
   catch (e) { $('livegameErr').textContent = e.message; }
+}
+// Start the next game: load a fresh slate and jump to where you pick. Keeps bankroll + history.
+async function newGame() {
+  try {
+    renderLiveGame((await call('/api/livegame/new', sizing())).livegame);
+    await refresh();
+    document.querySelector('.area.livegame').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    flashDecision('🎮 Fresh games loaded — pick your next one below (click a game, or a 🔴 Enter option).');
+  } catch (e) { $('liveErr').textContent = e.message; }
 }
 function renderLiveGame(pg) {
   lastLivegame = pg;
