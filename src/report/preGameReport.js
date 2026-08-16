@@ -145,6 +145,8 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical, st
     opponent: cand.opponent,
     ticker: cand.ticker,
     kind,
+    verified: cand.verified ?? false, // 🟢 real Kalshi price vs ⚪ simulated/entered
+    source: cand.source ?? null,      // e.g. 'KALSHI'
     gameTime: cand.gameTime ?? null,
     gameState: cand.gameState ?? null,
     priceCents,
@@ -199,7 +201,7 @@ function narrate(item, targetCents) {
  * @param {Array}  board     candidate markets (prices resolved)
  * @param {Object} opts      { feeRate, historical }
  */
-export function buildPreGameReport(snapshot, board, { feeRate, historical, stakeCents, sizeMode } = {}) {
+export function buildPreGameReport(snapshot, board, { feeRate, historical, stakeCents, sizeMode, mode = 'SIMULATION' } = {}) {
   const targetCents = snapshot.target.targetCents;
   const cashCents = snapshot.bankroll.currentCashCents;
 
@@ -222,7 +224,7 @@ export function buildPreGameReport(snapshot, board, { feeRate, historical, stake
   const histWins = historical ? historical.decisions.filter((d) => d.won).length : 0;
 
   return {
-    mode: 'SIMULATION',
+    mode,
     generatedAt: snapshot.generatedAt,
     header: {
       startingBankrollCents: snapshot.bankroll.startingBankrollCents,
@@ -239,11 +241,12 @@ export function buildPreGameReport(snapshot, board, { feeRate, historical, stake
     },
     quickBoard: ranked.map((r) => ({
       rank: r.rank, medal: r.medal, team: r.team, opponent: r.opponent, kind: r.kind,
+      ticker: r.ticker, verified: r.verified, source: r.source,
       priceCents: r.priceCents, marketProbabilityPct: r.marketProbabilityPct,
       payoutMultiple: r.payoutMultiple, legs: r.legs,
       edgePct: r.edgePct, evCents: r.evCents, estProbPct: r.estProbPct, historicallyInformed: r.historicallyInformed,
       stakeForTargetCents: r.stakeForTargetCents, potentialProfitCents: r.potentialProfitCents,
-      capitalPct: r.capitalPct, affordable: r.affordable, gameTime: r.gameTime,
+      capitalPct: r.capitalPct, affordable: r.affordable, gameTime: r.gameTime, gameState: r.gameState,
     })),
     actionRanking: ranked,
     excluded,

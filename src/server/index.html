@@ -197,7 +197,7 @@
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="refreshLiveGames()">🔄 Refresh prices</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="newSlate()">🎲 New slate</button></div>
+        <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="newSlate()">🎲 New slate</button></div>
       </div>
       <div class="err" id="livegameErr"></div>
       <div id="livegameOut"><p class="muted">Hit "Rank live games" to scan games in progress.</p></div>
@@ -276,16 +276,47 @@ function toggle(h) {
   if (body && body.classList.contains('body')) body.classList.toggle('hidden');
 }
 
-// Simulation vs Live Play mode (visual for now; live data is Phase 1).
+// Simulation vs Live Play. In LIVE mode the Live Game Board reads REAL Kalshi prices
+// (read-only); the clock-simulation controls are simulation-only and hide themselves.
 let appMode = localStorage.getItem('appMode') === 'live' ? 'live' : 'sim';
-function applyMode() {
+const isLive = () => appMode === 'live';
+// Live Game Board endpoints, chosen by mode: real Kalshi vs the simulated slate.
+const liveBoardPath = () => (isLive() ? '/api/live/board' : '/api/livegame');
+const liveRefreshPath = () => (isLive() ? '/api/live/refresh' : '/api/livegame/refresh');
+
+async function applyMode() {
   document.body.classList.toggle('live-mode', appMode === 'live');
   const s = $('modeSim'), l = $('modeLive'), banner = $('liveBanner');
   if (s) s.classList.toggle('active', appMode === 'sim');
   if (l) l.classList.toggle('active', appMode === 'live');
-  if (banner) banner.style.display = appMode === 'live' ? '' : 'none';
+  // Hide simulation-only clock controls in live mode (real games don't take a fake clock).
+  document.querySelectorAll('.sim-only').forEach((b) => { b.style.display = isLive() ? 'none' : ''; });
+  if (!banner) return;
+  if (!isLive()) { banner.style.display = 'none'; return; }
+  banner.style.display = '';
+  banner.innerHTML = '🔄 <b>Live Play</b> — checking Kalshi connection…';
+  try {
+    const st = (await call('/api/live/status')).live;
+    if (st.configured) {
+      banner.style.borderColor = 'var(--good)'; banner.style.borderLeftColor = 'var(--good)'; banner.style.background = '#f0fbf3';
+      banner.innerHTML = `🟢 <b>Live Play</b> — real Kalshi prices (<b>${st.base}</b>, <b>read-only</b>). The app never places orders; you trade manually on Kalshi. Hit “📋 Rank live games”.`;
+    } else {
+      banner.style.borderColor = 'var(--bad)'; banner.style.borderLeftColor = 'var(--bad)'; banner.style.background = '#fff5f5';
+      banner.innerHTML = `🔴 <b>Live Play</b> — ${st.note}`;
+    }
+  } catch (e) {
+    banner.style.borderColor = 'var(--bad)'; banner.style.borderLeftColor = 'var(--bad)'; banner.style.background = '#fff5f5';
+    banner.innerHTML = `🔴 <b>Live Play</b> — could not reach live status: ${e.message}`;
+  }
 }
-function setMode(m) { appMode = m === 'live' ? 'live' : 'sim'; localStorage.setItem('appMode', appMode); applyMode(); }
+function setMode(m) {
+  appMode = m === 'live' ? 'live' : 'sim';
+  localStorage.setItem('appMode', appMode);
+  stopPlay();
+  applyMode();
+  // Load the right board for the new mode so the switch is immediate.
+  livegame().catch(() => {});
+}
 
 // Current sizing preference: fixed dollar stake, or size-to-target.
 function sizing() {
@@ -474,6 +505,10 @@ function currentSport() { const el = $('sportSel'); return (el && GAME_FORMATS[e
 function setGameClock(txt) { const el = $('gameClock'); if (el) el.textContent = txt ? `🕐 ${txt}` : ''; }
 
 async function gameTick() {
+  // LIVE mode: "Play" just polls REAL Kalshi prices on a timer. It never invents a
+  // clock and never auto-settles your positions — real games decide those.
+  if (isLive()) { await refreshLiveGames(); await refresh(); return true; }
+
   const fmtG = GAME_FORMATS[currentSport()];
   const snap = (await call('/api/state')).snapshot;
   const open = snap.positions.filter((p) => p.status === 'open');
@@ -683,7 +718,7 @@ async function refresh() {
     }
     // fetch replacements first so the decision tree can offer one-click swaps
     lastReplacements = (await call('/api/replacements', { board: gatherBoard(), ...sizing() })).replacements;
-    lastLivegame = (await call('/api/livegame', sizing())).livegame;   // ranked live board for the decision menu
+    lastLivegame = withMeta(await call(liveBoardPath(), sizing()));   // ranked board (real Kalshi in live mode)
     renderSnapshot(state.snapshot);
     renderGoalPath(state.goalPath);
     renderReplacements(lastReplacements);
@@ -774,41 +809,64 @@ async function pregame() {
   } catch (e) { $('rankErr').textContent = e.message; }
 }
 
-// ---- 🔴 Live Game Board: scan in-progress games and jump in ----
+// ---- Live Game Board: scan games and jump in (real Kalshi in live mode) ----
 let lastLivegame = null;
+// Attach the response's live metadata (asOf/priced/base) onto the report for rendering.
+function withMeta(resp) {
+  const pg = resp.livegame;
+  if (resp.asOf) pg.asOf = resp.asOf;
+  if (resp.priced != null) pg.priced = resp.priced;
+  if (resp.base) pg.base = resp.base;
+  return pg;
+}
 async function livegame() {
-  try { renderLiveGame((await call('/api/livegame', sizing())).livegame); }
+  try { $('livegameErr').textContent = ''; renderLiveGame(withMeta(await call(liveBoardPath(), sizing()))); }
   catch (e) { $('livegameErr').textContent = e.message; }
 }
 async function refreshLiveGames() {
-  try { renderLiveGame((await call('/api/livegame/refresh', sizing())).livegame); }
+  try { $('livegameErr').textContent = ''; renderLiveGame(withMeta(await call(liveRefreshPath(), sizing()))); }
   catch (e) { $('livegameErr').textContent = e.message; }
 }
 async function newSlate() {
-  try { renderLiveGame((await call('/api/livegame/new', sizing())).livegame); await refresh(); }
-  catch (e) { $('livegameErr').textContent = e.message; }
+  // Sim: pull a fresh random slate. Live: real games don't regenerate — just refresh prices.
+  try {
+    $('livegameErr').textContent = '';
+    if (isLive()) return refreshLiveGames();
+    renderLiveGame(withMeta(await call('/api/livegame/new', sizing()))); await refresh();
+  } catch (e) { $('livegameErr').textContent = e.message; }
 }
-// Start the next game: load a fresh slate and jump to where you pick. Keeps bankroll + history.
+// Start the next game: load a fresh board and jump to where you pick. Keeps bankroll + history.
 async function newGame() {
   try {
-    renderLiveGame((await call('/api/livegame/new', sizing())).livegame);
+    const path = isLive() ? liveRefreshPath() : '/api/livegame/new';
+    renderLiveGame(withMeta(await call(path, sizing())));
     await refresh();
     document.querySelector('.area.livegame').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    flashDecision('🎮 Fresh games loaded — pick your next one below (click a game, or a 🔴 Enter option).');
+    flashDecision(isLive()
+      ? '🟢 Live board refreshed — pick a game below (click a game, or an Enter option).'
+      : '🎮 Fresh games loaded — pick your next one below (click a game, or a 🔴 Enter option).');
   } catch (e) { $('liveErr').textContent = e.message; }
 }
 function renderLiveGame(pg) {
   lastLivegame = pg;
-  let html = '<div style="border:1px solid var(--line);border-left:4px solid var(--bad);border-radius:8px;padding:14px;background:#fff">';
-  html += '<div style="font-weight:800;margin-bottom:6px">🔴 LIVE GAME BOARD <span class="muted" style="font-weight:500">— ⚪ simulation; prices drift on refresh, game states illustrative</span></div>';
+  const live = pg.mode === 'LIVE';
+  const edge = live ? 'var(--good)' : 'var(--bad)';
+  let html = `<div style="border:1px solid var(--line);border-left:4px solid ${edge};border-radius:8px;padding:14px;background:#fff">`;
+  if (live) {
+    const asOf = pg.asOf ? new Date(pg.asOf).toLocaleTimeString() : '';
+    html += `<div style="font-weight:800;margin-bottom:6px">🟢 LIVE GAME BOARD <span class="muted" style="font-weight:500">— real Kalshi prices (${pg.base || 'PRODUCTION'}, read-only)${pg.priced != null ? ' · ' + pg.priced + ' markets' : ''}${asOf ? ' · as of ' + asOf : ''}</span></div>`;
+  } else {
+    html += '<div style="font-weight:800;margin-bottom:6px">🔴 LIVE GAME BOARD <span class="muted" style="font-weight:500">— ⚪ simulation; prices drift on refresh, game states illustrative</span></div>';
+  }
   html += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">' +
     '<span class="muted" style="font-size:12px">click a game to select, then jump in</span>' +
     '<button class="sm" onclick="openSelectedNow()">⚡ Open selected now</button>' +
     '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button></div>';
   if (!pg.actionRanking.length) html += '<p class="muted">No live games right now.</p>';
   pg.actionRanking.forEach((it, i) => {
+    const badge = it.verified ? '<span title="real Kalshi price">🟢</span> ' : '';
     html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="togglePick(this)">
-        <div><span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
+        <div>${badge}<span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         ${it.gameState ? `<div style="font-size:12px;color:var(--bad)">🔴 ${it.gameState}</div>` : ''}
         <div class="why">${it.why}</div>

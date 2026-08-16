@@ -1,13 +1,18 @@
-// server.js — a tiny zero-dependency web app to exercise the SimEngine.
+// server.js — a tiny zero-dependency web app for the trading engine.
 //
-// Uses only Node built-ins (http, fs, path, url). Holds ONE in-memory SimEngine —
-// state resets when the server restarts (persistence is a separate feature).
-// Everything here is SIMULATION; it never touches live data or real money.
+// Uses only Node built-ins (http, fs, path, url). Holds ONE in-memory SimEngine for
+// the SIMULATION side (bankroll, positions, history — persisted to disk). LIVE mode
+// layers real, READ-ONLY Kalshi market prices on top; it NEVER places orders and
+// NEVER mixes live prices into the simulated bankroll.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+
+// Load local secrets (Kalshi key id + private key) for LIVE mode. Safe no-op if absent.
+if (existsSync('.env')) process.loadEnvFile('.env');
 
 import { SimEngine } from '../engine/simEngine.js';
 import { toCents } from '../domain/money.js';
@@ -17,10 +22,67 @@ import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js
 import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
+import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO } from '../data/kalshiMarketProvider.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
 const STATE_FILE = process.env.STATE_FILE || join(__dirname, '../../data/sim-state.json');
+
+// ---- LIVE Kalshi data (read-only; NEVER places orders) --------------------
+// One lazily-built provider reads real MLB prices. A short cache keeps refreshes
+// snappy without hammering the API. In LIVE mode we NEVER fall back to fake data —
+// a fetch failure surfaces as an error so the board can never mix live with sim.
+let kalshi = null;
+function kalshiProvider() {
+  if (!kalshi) kalshi = new KalshiMarketProvider();
+  return kalshi;
+}
+const LIVE_TTL_MS = 8000;
+let liveCache = { at: 0, board: [] };
+
+// Map Kalshi's grouped MLB games into board candidates (one per priced team side),
+// tagged verified + source so the UI can badge them 🟢 and never confuse them with sim.
+function mlbGamesToCandidates(games) {
+  const board = [];
+  for (const g of games) {
+    for (const s of g.sides) {
+      if (s.priceCents == null) continue; // never invent a price
+      const other = g.sides.find((x) => x.ticker !== s.ticker);
+      const tradeable = s.status === 'active' || s.status === 'open';
+      board.push({
+        id: s.ticker,
+        team: s.team,
+        opponent: other?.team ?? null,
+        ticker: s.ticker,
+        kind: 'single',
+        priceCents: s.priceCents,
+        gameState: null, // live game state (inning) arrives in a later phase
+        status: tradeable ? 'open' : (s.status ?? 'open'),
+        verified: true,
+        source: 'KALSHI',
+      });
+    }
+  }
+  return board;
+}
+
+async function liveMlbBoard({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - liveCache.at < LIVE_TTL_MS && liveCache.board.length) return liveCache.board;
+  // Today's slate: games in progress (started up to 6h ago) through the next ~20h.
+  const games = await kalshiProvider().listMlbGames({
+    status: 'open', limit: 300, withinHoursBehind: 6, withinHoursAhead: 20,
+  });
+  const board = mlbGamesToCandidates(games);
+  liveCache = { at: now, board };
+  return board;
+}
+
+function liveBaseLabel(url) {
+  if (url === KALSHI_PROD || url?.includes('elections.kalshi.com')) return 'PRODUCTION';
+  if (url === KALSHI_DEMO || url?.includes('demo.kalshi')) return 'DEMO';
+  return url ?? 'PRODUCTION';
+}
 
 // ---- state: loaded from disk on boot, saved after every change ------------
 let engine;
@@ -303,6 +365,51 @@ const api = {
     return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
+  // ---- LIVE Kalshi board (real prices, read-only) -------------------------
+  // Config/connectivity status for the UI's live-mode banner. No secrets returned.
+  'GET /api/live/status': () => {
+    const p = kalshiProvider();
+    return {
+      live: {
+        configured: p.isConfigured,
+        source: p.source,
+        base: liveBaseLabel(p.baseUrl),
+        verified: p.verified,
+        note: p.isConfigured
+          ? 'Read-only live prices. The app never places orders.'
+          : '🔴 NOT VERIFIED — add Kalshi credentials to .env (see KALSHI_SETUP.md).',
+      },
+    };
+  },
+
+  // Real MLB board from Kalshi, ranked by the same edge/EV engine. mode: 'LIVE'.
+  'POST /api/live/board': async (body) => {
+    const board = await liveMlbBoard();
+    return {
+      livegame: buildPreGameReport(engine.snapshot(), board, {
+        feeRate: engine.feeRate, historical: historicalEngine(), mode: 'LIVE', ...sizingOpts(body),
+      }),
+      asOf: new Date(liveCache.at).toISOString(),
+      priced: board.length,
+      source: 'KALSHI',
+      base: liveBaseLabel(kalshiProvider().baseUrl),
+    };
+  },
+
+  // Force a fresh pull (bypass the cache), e.g. on "u"/"update"/"refresh".
+  'POST /api/live/refresh': async (body) => {
+    const board = await liveMlbBoard({ force: true });
+    return {
+      livegame: buildPreGameReport(engine.snapshot(), board, {
+        feeRate: engine.feeRate, historical: historicalEngine(), mode: 'LIVE', ...sizingOpts(body),
+      }),
+      asOf: new Date(liveCache.at).toISOString(),
+      priced: board.length,
+      source: 'KALSHI',
+      base: liveBaseLabel(kalshiProvider().baseUrl),
+    };
+  },
+
   'POST /api/replacements': (body) => {
     const board = addCombos((body.board ?? []).map(resolveCandidate));
     return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
@@ -418,7 +525,7 @@ const server = createServer(async (req, res) => {
     if (!handler) return sendJson(res, 404, { error: `no route ${key}` });
 
     const body = req.method === 'POST' ? await readBody(req) : {};
-    const result = handler(body);
+    const result = await handler(body);
     if (MUTATING.has(url.pathname)) persist();
     return sendJson(res, 200, { ok: true, ...result });
   } catch (err) {
@@ -427,5 +534,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`⚪ Sports Trading App (SIMULATION) running at http://localhost:${PORT}`);
+  const p = kalshiProvider();
+  const live = p.isConfigured ? `🟢 LIVE ready (${liveBaseLabel(p.baseUrl)}, read-only)` : '⚪ live not configured';
+  console.log(`Sports Trading App running at http://localhost:${PORT}  —  ${live}`);
 });

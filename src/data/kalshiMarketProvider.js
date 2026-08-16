@@ -64,6 +64,9 @@ export function normalizeMarket(m) {
     volume,
     // Genuine tradeable market: either it has traded, or it shows a real two-sided quote.
     hasLiquidity: volume > 0 || (bid != null && ask != null),
+    // When the game is scheduled to start (best for "today's slate"); close is the
+    // market's expiry, which can be days later to cover postponements.
+    occurrenceTime: m.occurrence_datetime ?? null,
     closeTime: m.close_time ?? m.expected_expiration_time ?? null,
   };
 }
@@ -159,8 +162,11 @@ export class KalshiMarketProvider extends MarketProvider {
   /**
    * List MLB "game winner" markets, grouped into games. Each game pairs the two team
    * sides (home/away) with real YES prices in cents and a VERIFIED flag when priced.
+   *
+   * Optionally scope to a time window around now (hours behind/ahead of the scheduled
+   * start) so callers can show just "today's slate" instead of every listed day.
    */
-  async listMlbGames({ status = 'open', limit = 200 } = {}) {
+  async listMlbGames({ status = 'open', limit = 300, withinHoursAhead, withinHoursBehind = 6 } = {}) {
     const markets = await this.listMarkets({ seriesTicker: KALSHI_MLB_SERIES, status, limit });
     const byEvent = new Map();
     for (const raw of markets) {
@@ -169,17 +175,30 @@ export class KalshiMarketProvider extends MarketProvider {
       if (!byEvent.has(m.eventTicker)) byEvent.set(m.eventTicker, []);
       byEvent.get(m.eventTicker).push(m);
     }
-    const games = [];
+    let games = [];
     for (const [eventTicker, sides] of byEvent) {
       games.push({
         eventTicker,
         title: sides[0]?.title ?? null,
+        occurrenceTime: sides[0]?.occurrenceTime ?? null,
         closeTime: sides[0]?.closeTime ?? null,
         sides, // one entry per team, each with team/priceCents/bid/ask/verified
         // A game is "priced" only if at least one side has a real (non-placeholder) quote.
         priced: sides.some((s) => s.hasLiquidity && s.priceCents != null),
       });
     }
+    if (withinHoursAhead != null) {
+      const now = Date.now();
+      const lo = now - withinHoursBehind * 3600e3;
+      const hi = now + withinHoursAhead * 3600e3;
+      games = games.filter((g) => {
+        if (!g.occurrenceTime) return true; // don't drop games with no scheduled time
+        const t = Date.parse(g.occurrenceTime);
+        return Number.isNaN(t) || (t >= lo && t <= hi);
+      });
+    }
+    // Soonest games first.
+    games.sort((a, b) => (Date.parse(a.occurrenceTime || 0) || 0) - (Date.parse(b.occurrenceTime || 0) || 0));
     return games;
   }
 
