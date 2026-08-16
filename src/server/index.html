@@ -191,6 +191,7 @@
       <span class="tag">move the price / game state, hit Update, watch the target</span><span class="chev">▾</span></h2>
     <div class="body">
       <div id="goalPath"></div>
+      <div id="targetMonitor"></div>
       <table>
         <thead><tr><th>Position</th><th>Entry</th><th>Game state</th><th>Now (¢)</th><th>Payout</th><th>Value</th><th>Unrealized P/P</th><th>Actions</th></tr></thead>
         <tbody id="posBody"><tr><td colspan="8" class="muted">No open positions. Enter one in Pre-Game.</td></tr></tbody>
@@ -314,7 +315,26 @@ function renderSnapshot(snap) {
         <button class="sm ghost" onclick="settle('${p.id}','win')">Win</button>
         <button class="sm ghost" onclick="settle('${p.id}','loss')">Loss</button></td></tr>`;
   }).join('') : '<tr><td colspan="8" class="muted">No open positions. Enter one in Pre-Game.</td></tr>';
+  renderTargetMonitor(snap);
   renderDecisions(snap);
+}
+
+// 💰 Target monitor — live status, computed straight from the snapshot.
+function renderTargetMonitor(snap) {
+  const el = $('targetMonitor');
+  if (!el) return;
+  const t = snap.target, b = snap.bankroll, target = t.targetCents;
+  const withinReach = t.state === 'TARGET AVAILABLE' || t.state === 'TARGET LOCKED';
+  const approaching = t.realizableIfExitNowCents >= target / 2 && t.state === 'TARGET NOT REACHED';
+  const achieved = t.state === 'TARGET REALIZED';
+  const yn = (v) => (v ? '✅' : '❌');
+  el.innerHTML = `<div style="font-weight:700;font-size:12px;margin:4px 0 6px">💰 Target monitor</div>
+    <table style="margin-bottom:12px"><tbody>
+      <tr><td class="muted">Starting bankroll</td><td>${fmt(b.startingBankrollCents)}</td><td class="muted">Progress</td><td>${Math.round(t.realizedProgress * 100)}%</td></tr>
+      <tr><td class="muted">Realized profit</td><td class="${cls(b.realizedPureProfitCents)}">${fmt(b.realizedPureProfitCents)}</td><td class="muted">Within reach</td><td>${yn(withinReach)}</td></tr>
+      <tr><td class="muted">Potential profit</td><td class="${cls(b.unrealizedPureProfitCents)}">${fmt(b.unrealizedPureProfitCents)}</td><td class="muted">Approaching</td><td>${yn(approaching)}</td></tr>
+      <tr><td class="muted">Target</td><td>${fmt(target)}</td><td class="muted">Achieved</td><td>${yn(achieved)}</td></tr>
+    </tbody></table>`;
 }
 
 // ---- Your Decision menu (numbered, click or matches spec's 1/2/3 replies) ----
@@ -839,7 +859,7 @@ async function openAllStaged() {
 let lastPregame = null;
 function renderPreGame(pg) {
   lastPregame = pg;
-  const h = pg.header, tm = pg.targetMonitor;
+  const h = pg.header;
   let html = '<div style="border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:12px;background:#fff">';
   html += '<div style="font-weight:800;letter-spacing:.03em;margin-bottom:8px">🧪 PRE-GAME REPORT <span class="muted" style="font-weight:500">— ⚪ simulation, prices as entered</span></div>';
 
@@ -898,20 +918,6 @@ function renderPreGame(pg) {
   });
   if (pg.excluded.length) html += '<div class="muted" style="margin-top:8px;font-size:12px"><b>Excluded:</b> ' +
     pg.excluded.map((e) => `${e.team ?? e.id} — ${e.reason}`).join(' · ') + '</div>';
-
-  // target monitor
-  html += `<div style="font-weight:700;margin:14px 0 6px">💰 Target monitor</div>
-    <table><tbody>
-      <tr><td class="muted">Starting bankroll</td><td>${fmt(tm.startingBankrollCents)}</td>
-          <td class="muted">Progress</td><td>${tm.progressPct}%</td></tr>
-      <tr><td class="muted">Realized profit</td><td class="${cls(tm.realizedPureProfitCents)}">${fmt(tm.realizedPureProfitCents)}</td>
-          <td class="muted">Within reach</td><td>${tm.withinReach ? '✅' : '❌'}</td></tr>
-      <tr><td class="muted">Potential profit</td><td class="${cls(tm.potentialPureProfitCents)}">${fmt(tm.potentialPureProfitCents)}</td>
-          <td class="muted">Approaching</td><td>${tm.approaching ? '✅' : '❌'}</td></tr>
-      <tr><td class="muted">Target</td><td>${fmt(tm.targetCents)}</td>
-          <td class="muted">Achieved</td><td>${tm.achieved ? '✅' : '❌'}</td></tr>
-      <tr><td class="muted">Affordable target bets</td><td colspan="3">${tm.affordableTargetBets}</td></tr>
-    </tbody></table>`;
 
   html += '</div>';
 
