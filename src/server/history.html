@@ -91,7 +91,11 @@ async function load() {
   for (const d of [...h.items].reverse()) {
     const when = d.ts ? new Date(d.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
     const game = (d.team ?? '—') + (d.opponent ? ' vs ' + d.opponent : '');
-    const exit = d.settlement ? d.settlement.toUpperCase() : (d.exitPriceCents != null ? d.exitPriceCents + '¢' : '—');
+    // Exit PRICE in cents: settled contracts pay out at 100¢ (win) / 0¢ (loss); early
+    // closes exit at their price. Show the settlement tag alongside for clarity.
+    const exit = d.exitPriceCents != null
+      ? `${d.exitPriceCents}¢${d.settlement ? ` (${d.settlement})` : ''}`
+      : (d.settlement ? d.settlement.toUpperCase() : '—');
     html += `<tr>
       <td class="muted">${when}</td>
       <td>${game}</td>
