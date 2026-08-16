@@ -43,8 +43,9 @@ const MLB_TEAMS = [
 
 // A random "daily slate" of in-progress games — varying count, matchups, innings and
 // prices — so each day feels different. Simulated until a real MLB feed is wired in.
-function generateLiveBoard() {
-  const teams = [...MLB_TEAMS];
+// `exclude` keeps teams you already hold out of the slate, so no team appears twice.
+function generateLiveBoard(exclude = new Set()) {
+  const teams = MLB_TEAMS.filter((t) => !exclude.has(t));
   for (let i = teams.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [teams[i], teams[j]] = [teams[j], teams[i]];
@@ -82,6 +83,17 @@ if (saved && saved.engine) {
   simHistory = [];
   missed = [];
   liveBoard = generateLiveBoard();
+}
+
+// Teams (and their opponents) currently in open positions — kept out of new slates.
+function heldTeams() {
+  const s = new Set();
+  for (const p of engine.positions) {
+    if (p.status !== 'open') continue;
+    if (p.team) s.add(p.team);
+    if (p.opponent) s.add(p.opponent);
+  }
+  return s;
 }
 
 // Random-walk the live prices so the board feels live between refreshes.
@@ -275,7 +287,7 @@ const api = {
 
   // Pull a fresh random daily slate of live games.
   'POST /api/livegame/new': (body) => {
-    liveBoard = generateLiveBoard();
+    liveBoard = generateLiveBoard(heldTeams());
     return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
