@@ -550,6 +550,12 @@ function renderReplacements(r) {
   if (!r || !r.suggestions || !r.suggestions.length) { el.innerHTML = ''; return; }
   let html = '<div style="margin-top:12px;border:1px solid var(--warn);border-radius:8px;padding:10px;background:#fffdf5">';
   html += '<b style="font-size:12px">🔄 Dynamic Replacement — a better leg may be available now</b>';
+  const betters = [...new Set(r.suggestions.map((s) => s.better.team))];
+  const betterTxt = betters.length === 1 ? `the ${betters[0]}` : `${betters.length} stronger picks`;
+  const nPos = r.suggestions.length;
+  html += `<div class="muted" style="font-size:12px;margin:5px 0 2px">In plain English: ${nPos} of your positions ${nPos > 1 ? 'are' : 'is'} scoring lower than what's available right now (${betterTxt}). ` +
+    `<b>Swap</b> = drop the weaker one and take it; <b>Open</b> = add it and keep what you have. ` +
+    `The edge is in the higher <i>score</i>, not today's price — selling now realizes almost nothing, so only switch if you believe the better pick.</div>`;
   r.suggestions.forEach((s, i) => {
     html += `<div style="font-size:12px;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
       Your <b>${s.held.team}</b> (now ${s.held.priceCents}¢, score ${s.held.score}) →
