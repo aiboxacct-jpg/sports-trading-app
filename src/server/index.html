@@ -29,6 +29,8 @@
   .kpis b { font-size: 17px; }
   .targetbox { border-left: 1px solid var(--line); padding-left: 18px; min-width: 210px; }
   .targetbox small { color: var(--muted); font-size: 11px; }
+  .stakebox { border-left: 1px solid var(--line); padding-left: 18px; }
+  .stakebox small { color: var(--muted); font-size: 11px; }
   .targetbox .state { font-weight: 800; font-size: 15px; }
   .state.NOTREACHED { color: var(--muted); }
   .state.AVAILABLE { color: var(--warn); }
@@ -105,6 +107,13 @@
     <div class="state" id="targetState">—</div>
     <div class="alert" id="targetAlert"></div>
   </div>
+  <div class="stakebox">
+    <small>Stake / pick</small>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+      <span style="font-weight:800">$</span><input id="rStake" type="number" value="1" step="0.5" min="0.1" style="width:64px;font-weight:700" onchange="onStakeChange()" />
+      <select id="sizeMode" style="width:auto" onchange="onStakeChange()"><option value="fixed">Fixed stake</option><option value="target">Size to +target</option></select>
+    </div>
+  </div>
   <div class="setup">
     start $<input id="startDollars" type="number" value="100" />
     target $<input id="targetDollars" type="number" value="5" />
@@ -124,10 +133,9 @@
     <div class="body">
       <div id="pregameOut"></div>
       <div class="row" style="margin-bottom:10px">
-        <div style="flex:0 0 auto"><label>Stake ($)</label><input id="rStake" type="number" value="10" step="0.5" style="width:90px" /></div>
-        <div style="flex:0 0 auto"><label>Sizing</label><select id="sizeMode" style="width:auto" onchange="pregame()"><option value="fixed">Fixed stake</option><option value="target">Size to +target</option></select></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="rank()">Quick rank</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="pregame()">📋 Pre-Game Report</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><span class="muted" style="font-size:12px">sized at the Stake set up top</span></div>
       </div>
       <div class="err" id="rankErr"></div>
       <div id="rankOut"></div>
@@ -245,7 +253,12 @@ function toggle(h) {
 
 // Current sizing preference: fixed dollar stake, or size-to-target.
 function sizing() {
-  return { stakeDollars: +$('rStake').value || 10, sizeMode: ($('sizeMode') && $('sizeMode').value) || 'fixed' };
+  return { stakeDollars: +$('rStake').value || 1, sizeMode: ($('sizeMode') && $('sizeMode').value) || 'fixed' };
+}
+// Re-rank when the stake/sizing changes (it sets the tone for every pick).
+function onStakeChange() {
+  if ($('pregameOut') && $('pregameOut').innerHTML.trim()) pregame();
+  refresh();
 }
 
 async function call(path, body) {
