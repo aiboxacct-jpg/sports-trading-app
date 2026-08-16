@@ -249,6 +249,7 @@ function resolveCandidate(c, i) {
   const base = {
     id: c.id || `cand-${i + 1}`, team: c.team, opponent: c.opponent,
     kind: c.kind === 'combo' ? 'combo' : 'single',
+    verified: c.verified === true, source: c.source || null, // keep 🟢 real-price provenance
     gameTime: c.gameTime || null, gameState: c.gameState || null, status: c.status || 'open',
   };
   if (base.kind === 'combo') {
@@ -335,7 +336,8 @@ const api = {
 
   'POST /api/pregame': (body) => {
     const board = addCombos((body.board ?? []).map(resolveCandidate));
-    return { pregame: buildPreGameReport(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
+    const mode = body.mode === 'LIVE' ? 'LIVE' : 'SIMULATION';
+    return { pregame: buildPreGameReport(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), mode, ...sizingOpts(body) }) };
   },
 
   'POST /api/livegame': (body) => ({
@@ -389,6 +391,7 @@ const api = {
       livegame: buildPreGameReport(engine.snapshot(), board, {
         feeRate: engine.feeRate, historical: historicalEngine(), mode: 'LIVE', ...sizingOpts(body),
       }),
+      candidates: board, // raw real-price board so ranking/pre-game/replacements can reuse it
       asOf: new Date(liveCache.at).toISOString(),
       priced: board.length,
       source: 'KALSHI',
@@ -403,6 +406,7 @@ const api = {
       livegame: buildPreGameReport(engine.snapshot(), board, {
         feeRate: engine.feeRate, historical: historicalEngine(), mode: 'LIVE', ...sizingOpts(body),
       }),
+      candidates: board, // raw real-price board so ranking/pre-game/replacements can reuse it
       asOf: new Date(liveCache.at).toISOString(),
       priced: board.length,
       source: 'KALSHI',

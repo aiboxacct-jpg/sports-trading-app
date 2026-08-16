@@ -717,8 +717,9 @@ async function refresh() {
       }
     }
     // fetch replacements first so the decision tree can offer one-click swaps
-    lastReplacements = (await call('/api/replacements', { board: gatherBoard(), ...sizing() })).replacements;
     lastLivegame = withMeta(await call(liveBoardPath(), sizing()));   // ranked board (real Kalshi in live mode)
+    // Replacement scan runs against the same board we're showing (real games in live mode).
+    lastReplacements = (await call('/api/replacements', { board: isLive() ? lastLiveCandidates : gatherBoard(), ...sizing() })).replacements;
     renderSnapshot(state.snapshot);
     renderGoalPath(state.goalPath);
     renderReplacements(lastReplacements);
@@ -783,8 +784,8 @@ async function settle(id, outcome) {
 }
 
 // ---- ranking board ----
-// Built-in board the ranking buttons operate on. When the Kalshi feed is wired in,
-// this will be replaced by the live MLB board.
+// Hypothetical sample board for SIMULATION mode only — example matchups to exercise the
+// engine. In Live Play mode the ranking tools use real Kalshi games (see boardForRanking).
 function gatherBoard() {
   return [
     { team: 'Yankees', opponent: 'Red Sox', kind: 'single', priceCents: 62 },
@@ -798,26 +799,37 @@ function gatherBoard() {
 async function rank() {
   try {
     $('rankErr').textContent = ''; $('pregameOut').innerHTML = '';
-    renderRanking((await call('/api/rank', { stakeDollars: +$('rStake').value, board: gatherBoard() })).ranking);
+    renderRanking((await call('/api/rank', { stakeDollars: +$('rStake').value, board: await boardForRanking() })).ranking);
   } catch (e) { $('rankErr').textContent = e.message; }
 }
 
 async function pregame() {
   try {
     $('rankErr').textContent = ''; $('rankOut').innerHTML = '';
-    renderPreGame((await call('/api/pregame', { board: gatherBoard(), ...sizing() })).pregame);
+    const board = await boardForRanking();
+    renderPreGame((await call('/api/pregame', { board, mode: isLive() ? 'LIVE' : 'SIMULATION', ...sizing() })).pregame);
   } catch (e) { $('rankErr').textContent = e.message; }
 }
 
 // ---- Live Game Board: scan games and jump in (real Kalshi in live mode) ----
 let lastLivegame = null;
+let lastLiveCandidates = [];   // raw real-price board (for ranking / pre-game / replacements)
 // Attach the response's live metadata (asOf/priced/base) onto the report for rendering.
 function withMeta(resp) {
   const pg = resp.livegame;
   if (resp.asOf) pg.asOf = resp.asOf;
   if (resp.priced != null) pg.priced = resp.priced;
   if (resp.base) pg.base = resp.base;
+  if (Array.isArray(resp.candidates)) lastLiveCandidates = resp.candidates;
   return pg;
+}
+// The board the ranking tools operate on: REAL Kalshi games in live mode, the
+// hypothetical sample board in simulation mode.
+async function boardForRanking() {
+  if (!isLive()) return gatherBoard();
+  const resp = await call('/api/live/board', sizing());
+  withMeta(resp);
+  return lastLiveCandidates;
 }
 async function livegame() {
   try { $('livegameErr').textContent = ''; renderLiveGame(withMeta(await call(liveBoardPath(), sizing()))); }
@@ -967,8 +979,11 @@ let lastPregame = null;
 function renderPreGame(pg) {
   lastPregame = pg;
   const h = pg.header;
-  let html = '<div style="border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:12px;background:#fff">';
-  html += '<div style="font-weight:800;letter-spacing:.03em;margin-bottom:8px">🧪 PRE-GAME REPORT <span class="muted" style="font-weight:500">— ⚪ simulation, prices as entered</span></div>';
+  const live = pg.mode === 'LIVE';
+  let html = `<div style="border:1px solid var(--line);${live ? 'border-left:4px solid var(--good);' : ''}border-radius:8px;padding:14px;margin-top:12px;background:#fff">`;
+  html += live
+    ? '<div style="font-weight:800;letter-spacing:.03em;margin-bottom:8px">🟢 PRE-GAME REPORT <span class="muted" style="font-weight:500">— real Kalshi prices, today\'s games (read-only)</span></div>'
+    : '<div style="font-weight:800;letter-spacing:.03em;margin-bottom:8px">🧪 PRE-GAME REPORT <span class="muted" style="font-weight:500">— ⚪ simulation, prices as entered</span></div>';
 
   // header line
   html += `<div class="muted" style="font-size:12px;margin-bottom:10px">
@@ -988,9 +1003,10 @@ function renderPreGame(pg) {
   // quick board (edge/value first)
   html += '<table><thead><tr><th></th><th>Team</th><th>Kalshi</th><th>Your&nbsp;%</th><th>Edge</th><th>EV</th><th>Payout</th><th>Stake</th><th>%cash</th></tr></thead><tbody>';
   for (const r of pg.quickBoard) {
+    const badge = r.verified ? '<span title="real Kalshi price">🟢</span> ' : '';
     const label = r.kind === 'combo'
       ? `${r.team} <span class="muted">(combo: ${(r.legs || []).map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')})</span>`
-      : `${r.team ?? ''}${r.opponent ? ' <span class="muted">vs ' + r.opponent + '</span>' : ''} <span class="muted">(single)</span>`;
+      : `${badge}${r.team ?? ''}${r.opponent ? ' <span class="muted">vs ' + r.opponent + '</span>' : ''} <span class="muted">(single)</span>`;
     const edgeCls = r.edgePct > 0 ? 'pos' : r.edgePct < 0 ? 'neg' : '';
     html += `<tr>
       <td class="medal">${r.medal}</td>
