@@ -117,11 +117,21 @@ function missedSummary() {
 }
 function recordDecision(pos) {
   if (!pos) return;
+  const committed = pos.committedCents ?? ((pos.costCents ?? 0) + (pos.entryFeeCents ?? 0));
   simHistory.push({
+    ts: new Date().toISOString(),
+    team: pos.team ?? pos.ticker ?? null,
+    opponent: pos.opponent ?? null,
     kind: pos.kind ?? 'single',
     entryPriceCents: pos.entryPriceCents,
-    won: pos.realizedPureProfitCents > 0,
+    exitPriceCents: pos.status === 'settled' ? (pos.settlement === 'win' ? 100 : 0) : pos.exitPriceCents,
+    settlement: pos.settlement ?? null,
+    closedType: pos.status, // 'settled' | 'closed'
+    contracts: pos.contracts,
+    stakeCents: committed,
     realizedPureProfitCents: pos.realizedPureProfitCents,
+    won: pos.realizedPureProfitCents > 0,
+    roiPct: committed > 0 ? Math.round((pos.realizedPureProfitCents / committed) * 1000) / 10 : 0,
   });
 }
 
@@ -286,6 +296,29 @@ const api = {
     return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
   },
 
+  'GET /api/history': () => {
+    const items = simHistory;
+    const n = items.length;
+    const wins = items.filter((d) => d.won).length;
+    const totalRealizedCents = items.reduce((a, d) => a + (d.realizedPureProfitCents || 0), 0);
+    const totalStakeCents = items.reduce((a, d) => a + (d.stakeCents || 0), 0);
+    const profits = items.map((d) => d.realizedPureProfitCents || 0);
+    return {
+      history: {
+        items,
+        count: n,
+        wins,
+        losses: n - wins,
+        winRatePct: n ? Math.round((wins / n) * 1000) / 10 : null,
+        totalRealizedCents,
+        roiPct: totalStakeCents > 0 ? Math.round((totalRealizedCents / totalStakeCents) * 1000) / 10 : 0,
+        bestCents: n ? Math.max(...profits) : 0,
+        worstCents: n ? Math.min(...profits) : 0,
+        kinds: historicalEngine().kindSummary(),
+      },
+    };
+  },
+
   'GET /api/missed': () => ({ missed: missedSummary() }),
 
   'POST /api/missed/log': (body) => {
@@ -359,6 +392,12 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === '/spec' || url.pathname === '/spec.html') {
       const html = await readFile(join(__dirname, 'spec.html'));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(html);
+    }
+
+    if (url.pathname === '/history' || url.pathname === '/history.html') {
+      const html = await readFile(join(__dirname, 'history.html'));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(html);
     }
