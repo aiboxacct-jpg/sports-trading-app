@@ -18,6 +18,14 @@
   header h1 { font-size: 16px; margin: 0; }
   header .badge { font-size: 11px; color: var(--warn); border: 1px solid var(--warn);
     padding: 1px 7px; border-radius: 99px; letter-spacing: .04em; }
+  .modetoggle { display: inline-flex; border: 1px solid var(--line); border-radius: 99px; overflow: hidden; }
+  .modebtn { border: 0; background: transparent; color: var(--muted); font-size: 12px; font-weight: 700;
+    padding: 4px 12px; cursor: pointer; }
+  #modeSim.active { background: var(--accent); color: #fff; }
+  #modeLive.active { background: var(--bad); color: #fff; }
+  /* Live Play mode: a distinct light-blue wash so it's obvious you're not in Simulation. */
+  body.live-mode { background: #e9f2fc; }
+  body.live-mode header, body.live-mode .strip { background: #dcebfb; }
   header a { margin-left: auto; color: var(--accent); text-decoration: none; font-weight: 600; font-size: 14px; }
 
   /* pinned status strip */
@@ -94,7 +102,10 @@
 <body>
 <header>
   <h1>Sports Trading App</h1>
-  <span class="badge">⚪ SIMULATION</span>
+  <span class="modetoggle">
+    <button id="modeSim" class="modebtn active" onclick="setMode('sim')">⚪ Simulation</button>
+    <button id="modeLive" class="modebtn" onclick="setMode('live')">🔴 Live Play</button>
+  </span>
   <a href="/history" style="margin-left:auto;color:var(--accent);text-decoration:none;font-weight:600;font-size:14px">📊 History</a>
   <a href="/spec" style="color:var(--accent);text-decoration:none;font-weight:600;font-size:14px">📋 Spec</a>
 </header>
@@ -128,6 +139,10 @@
     <button class="ghost sm" onclick="refresh()">🔄 Update (u)</button>
     <span id="updatedAt"></span>
   </div>
+</div>
+
+<div id="liveBanner" style="display:none;margin:10px 20px 0;padding:10px 14px;border:1px solid var(--bad);border-left:4px solid var(--bad);border-radius:8px;background:#fff5f5;font-size:13px">
+  🔴 <b>Live Play</b> — no live market/game feed is connected yet. This mode will show real Kalshi prices once set up (see <a href="/spec">Spec</a> and KALSHI_SETUP.md). The simulation tools below belong to Simulation mode.
 </div>
 
 <main>
@@ -258,6 +273,17 @@ function toggle(h) {
   const body = h.nextElementSibling;
   if (body && body.classList.contains('body')) body.classList.toggle('hidden');
 }
+
+// Simulation vs Live Play mode (visual for now; live data is Phase 1).
+let appMode = localStorage.getItem('appMode') === 'live' ? 'live' : 'sim';
+function applyMode() {
+  document.body.classList.toggle('live-mode', appMode === 'live');
+  const s = $('modeSim'), l = $('modeLive'), banner = $('liveBanner');
+  if (s) s.classList.toggle('active', appMode === 'sim');
+  if (l) l.classList.toggle('active', appMode === 'live');
+  if (banner) banner.style.display = appMode === 'live' ? '' : 'none';
+}
+function setMode(m) { appMode = m === 'live' ? 'live' : 'sim'; localStorage.setItem('appMode', appMode); applyMode(); }
 
 // Current sizing preference: fixed dollar stake, or size-to-target.
 function sizing() {
@@ -987,6 +1013,7 @@ async function openQuickPick(i) {
 }
 
 $('autoLockCb').checked = autoLock;
+applyMode();
 refresh();
 </script>
 </body>
