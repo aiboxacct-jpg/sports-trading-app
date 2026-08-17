@@ -289,6 +289,12 @@
 const $ = (id) => document.getElementById(id);
 const fmt = (c) => (c == null ? '—' : (c < 0 ? '-$' : '$') + (Math.abs(c) / 100).toFixed(2));
 const cls = (c) => (c == null ? '' : c < 0 ? 'neg' : c > 0 ? 'pos' : '');
+// Plain-language description of a pick: which side you backed, single vs parlay.
+function pickText(item) {
+  return (item.kind === 'combo')
+    ? `🎯 Parlay: <b>${item.team}</b> <span class="muted">(all legs must win)</span>`
+    : `🎯 <b>${item.team ?? item.ticker}</b> to win${item.opponent ? ` <span class="muted">vs ${item.opponent}</span>` : ''}`;
+}
 
 function toggle(h) {
   h.classList.toggle('collapsed');
@@ -383,12 +389,8 @@ function renderSnapshot(snap) {
     // pulse red when this position's unrealized profit is closing in on the target
     const up = p.unrealizedPureProfitCents;
     const near = up != null && t.targetCents > 0 && up >= 0.7 * t.targetCents && up < t.targetCents;
-    const isCombo = p.kind === 'combo';
-    // Make the actual pick unmistakable: which side you're holding, single vs parlay.
-    const pickLabel = isCombo
-      ? `🎯 Parlay: <b>${p.team}</b> <span class="muted">(all legs must win)</span>`
-      : `🎯 <b>${p.team}</b> to win${p.opponent ? ` <span class="muted">vs ${p.opponent}</span>` : ''}`;
-    const kindLabel = isCombo ? 'combo (parlay)' : 'single';
+    const pickLabel = pickText(p);
+    const kindLabel = p.kind === 'combo' ? 'combo (parlay)' : 'single';
     return `<tr class="${near ? 'approaching' : ''}">
       <td>${pickLabel}
         <span class="status-open">[open]</span>${near ? ' <span class="nearflag">🔴 near target</span>' : ''}<br>
@@ -632,7 +634,7 @@ function renderPostGame(pg) {
     const recent = latestMs && (latestMs - (Date.parse(r.exitTs || 0) || 0)) <= 6000; // most-recent batch
     const rowCls = recent ? (r.result === 'WIN' ? 'pg-recent-win' : r.result === 'LOSS' ? 'pg-recent-loss' : '') : '';
     html += `<tr class="${rowCls}">
-      <td>${r.team ?? r.ticker}${r.opponent ? ' vs ' + r.opponent : ''}${recent ? ' <span class="muted" style="font-size:10px">◀ latest</span>' : ''}</td>
+      <td>${pickText(r)}${recent ? ' <span class="muted" style="font-size:10px">◀ latest</span>' : ''}</td>
       <td>${r.kind}</td>
       <td>${r.entryPriceCents}¢ → ${exit}</td>
       <td>${fmt(r.stakeCents)}</td>
@@ -651,7 +653,7 @@ function renderPostGame(pg) {
     for (const r of withJourney) {
       const exit = r.exit.type === 'exit' ? r.exit.priceCents + '¢' : r.exit.label.replace('settled ', '');
       html += `<div style="display:flex;align-items:center;gap:14px;border-top:1px solid var(--line);padding:8px 0">
-        <div style="min-width:150px;font-size:12px"><b>${r.team ?? r.ticker}</b> <span class="muted">${r.kind}</span><br>
+        <div style="min-width:170px;font-size:12px">${pickText(r)} <span class="muted">${r.kind}</span><br>
           <span class="muted">${r.entryPriceCents}¢ → ${exit}</span></div>
         ${journeySvg(r.priceJourney)}
         <div style="font-size:12px" class="${cls(r.realizedPureProfitCents)}">${fmt(r.realizedPureProfitCents)}</div>

@@ -85,12 +85,16 @@ async function load() {
   }
 
   html += '<h2>Every decision</h2><div class="wrap"><table><thead><tr>' +
-    '<th>When</th><th>Game</th><th>Kind</th><th>Entry</th><th>Exit</th><th>Ctr</th><th>Stake</th><th>Result</th><th>Profit</th><th>ROI</th>' +
+    '<th>When</th><th>Pick</th><th>Kind</th><th>Entry</th><th>Exit</th><th>Ctr</th><th>Stake</th><th>Result</th><th>Profit</th><th>ROI</th>' +
     '</tr></thead><tbody>';
   // newest first
   for (const d of [...h.items].reverse()) {
     const when = d.ts ? new Date(d.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-    const game = (d.team ?? '—') + (d.opponent ? ' vs ' + d.opponent : '');
+    // Plain-language pick: which side you backed, single vs parlay.
+    const game = d.team == null ? '—'
+      : (d.kind === 'combo'
+          ? `🎯 Parlay: <b>${d.team}</b>`
+          : `🎯 <b>${d.team}</b> to win${d.opponent ? ` <span class="muted">vs ${d.opponent}</span>` : ''}`);
     // Exit PRICE in cents: settled contracts pay out at 100¢ (win) / 0¢ (loss); early
     // closes exit at their price. Show the settlement tag alongside for clarity.
     const exit = d.exitPriceCents != null
