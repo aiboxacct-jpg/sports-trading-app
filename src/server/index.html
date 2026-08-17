@@ -789,6 +789,11 @@ async function refresh() {
     // In live mode, first pull real Kalshi prices + real MLB inning/score onto any open
     // positions (read-only, never settles). Sim mode just reads current state.
     const state = isLive() ? await call('/api/live/sync', {}) : await call('/api/state');
+    // Announce any positions the real game result just auto-settled in your paper ledger.
+    if (state.autoSettled && state.autoSettled.length) {
+      const msg = state.autoSettled.map((s) => `${s.team} ${s.outcome === 'win' ? '✅ WON' : '❌ LOST'} (${s.score})`).join(' · ');
+      flashDecision(`🏁 Auto-settled from final score: ${msg}`);
+    }
     // auto-lock: when the COMBINED book can realize the target, close the minimal
     // set of positions to secure it (one position or several together), then re-render
     if (autoLock) {

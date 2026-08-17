@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   nickFromKalshi, nickFromStatsName, inningLabel,
-  normalizeScheduleGames, findGameFor, etDateStr, fetchLiveGames,
+  normalizeScheduleGames, findGameFor, etDateStr, fetchLiveGames, winnerNick,
 } from '../src/data/mlbLiveFeed.js';
 
 test('nickFromKalshi maps disambiguated shared-city labels', () => {
@@ -51,6 +51,15 @@ test('normalizeScheduleGames flattens + matches a live game', () => {
   assert.equal(findGameFor([g], 'Orioles', 'Rays'), g);
   assert.equal(findGameFor([g], 'Rays', 'Orioles'), g);
   assert.equal(findGameFor([g], 'Orioles', 'Yankees'), null);
+});
+
+test('winnerNick picks the winner only for a decisive final game', () => {
+  assert.equal(winnerNick({ state: 'Final', away: 'Rays', home: 'Orioles', awayScore: 3, homeScore: 2 }), 'Rays');
+  assert.equal(winnerNick({ state: 'Final', away: 'Rays', home: 'Orioles', awayScore: 1, homeScore: 5 }), 'Orioles');
+  assert.equal(winnerNick({ state: 'Live', away: 'Rays', home: 'Orioles', awayScore: 3, homeScore: 2 }), null); // not final
+  assert.equal(winnerNick({ state: 'Final', away: 'Rays', home: 'Orioles', awayScore: 2, homeScore: 2 }), null); // tie -> skip
+  assert.equal(winnerNick({ state: 'Final', away: 'Rays', home: 'Orioles', awayScore: null, homeScore: 2 }), null);
+  assert.equal(winnerNick(null), null);
 });
 
 test('etDateStr renders the US-Eastern game day', () => {

@@ -64,6 +64,16 @@ export function normalizeScheduleGames(json) {
   }).filter((x) => x.away && x.home);
 }
 
+/**
+ * Winning team's nickname for a FINAL game, or null if not final / tied / missing scores.
+ * Used to auto-settle the paper ledger from the real result.
+ */
+export function winnerNick(g) {
+  if (!g || g.state !== 'Final') return null;
+  if (g.awayScore == null || g.homeScore == null || g.awayScore === g.homeScore) return null;
+  return g.awayScore > g.homeScore ? g.away : g.home;
+}
+
 /** Find the normalized game matching two nicknames (either home/away order). */
 export function findGameFor(games, nick1, nick2) {
   return games.find(

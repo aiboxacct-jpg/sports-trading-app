@@ -23,7 +23,7 @@ import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
 import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, mlbTickerDate } from '../data/kalshiMarketProvider.js';
-import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr } from '../data/mlbLiveFeed.js';
+import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr, winnerNick } from '../data/mlbLiveFeed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
@@ -463,11 +463,21 @@ const api = {
     let games = [];
     try { games = await fetchLiveGames(etDateStr(kalshiProvider().serverNow())); } catch { /* keep going */ }
     let priced = 0, stated = 0;
+    const autoSettled = [];
     for (const p of engine.positions) {
       if (p.status !== 'open') continue;
+      const g = findGameFor(games, nickFromKalshi(p.team), nickFromKalshi(p.opponent));
+      // Auto-settle the PAPER ledger from the real result once the game is Final. This
+      // never touches real money on Kalshi — it only records the outcome you'd have had.
+      const winner = winnerNick(g);
+      if (winner) {
+        const outcome = nickFromKalshi(p.team) === winner ? 'win' : 'loss';
+        recordDecision(engine.settle(p.id, outcome));
+        autoSettled.push({ team: p.team, outcome, score: `${g.away} ${g.awayScore}–${g.homeScore} ${g.home}` });
+        continue; // settled — no more price/state updates for this one
+      }
       const px = priceByTicker.get(p.ticker);
       if (px != null) { engine.setPrice(p.ticker, px); priced++; }
-      const g = findGameFor(games, nickFromKalshi(p.team), nickFromKalshi(p.opponent));
       if (g) {
         const gs = g.state === 'Live' ? `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
           : g.state === 'Final' ? `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
@@ -476,7 +486,7 @@ const api = {
       }
     }
     const snapshot = engine.snapshot();
-    return { snapshot, goalPath: computeGoalPath(snapshot), synced: { priced, stated } };
+    return { snapshot, goalPath: computeGoalPath(snapshot), synced: { priced, stated }, autoSettled };
   },
 
   // Force a fresh pull (bypass the cache), e.g. on "u"/"update"/"refresh".
