@@ -847,7 +847,14 @@ async function refresh() {
     // brief confirmation flash so the keyboard update feels responsive
     el.style.transition = 'none'; el.style.color = 'var(--good)';
     requestAnimationFrame(() => { el.style.transition = 'color .8s'; el.style.color = ''; });
-  } catch (e) { $('liveErr').textContent = e.message; }
+    $('liveErr').textContent = ''; // a good refresh clears any earlier hiccup
+  } catch (e) {
+    // A network blip (server briefly down / restarting) shows a calm, self-healing note —
+    // the next 12s tick or tab focus recovers automatically. Real errors show as-is.
+    $('liveErr').textContent = /fetch|network|load failed/i.test(e.message)
+      ? '⚠️ Briefly lost the app server — retrying automatically…'
+      : e.message;
+  }
 }
 
 // Spec's Live Update: press "u" (or "r") to regenerate the live report immediately.
