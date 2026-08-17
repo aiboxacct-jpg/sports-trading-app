@@ -957,10 +957,12 @@ function renderLiveGame(pg) {
   if (live) {
     const asOf = pg.asOf ? new Date(pg.asOf).toLocaleTimeString() : '';
     html += `<div style="font-weight:800;margin-bottom:6px">🟢 LIVE GAME BOARD <span class="muted" style="font-weight:500">— real Kalshi prices (${pg.base || 'PRODUCTION'}, read-only)${pg.priced != null ? ' · ' + pg.priced + ' markets' : ''}${asOf ? ' · as of ' + asOf : ''}</span></div>`;
-    // Blinking count of games actually in progress right now.
-    html += liveCount
-      ? `<div style="margin:2px 0 6px"><span class="live-badge">🔴 LIVE</span> <span class="live-count">${liveCount} game${liveCount === 1 ? '' : 's'} in progress now</span> <span class="muted" style="font-size:11px">— live inning &amp; score from MLB</span></div>`
-      : `<div style="margin:2px 0 6px" class="muted" style="font-size:12px">⏰ No games live yet — upcoming games show their start time.</div>`;
+    // Blinking count of games actually in progress right now (only when there are games).
+    if (liveCount) {
+      html += `<div style="margin:2px 0 6px"><span class="live-badge">🔴 LIVE</span> <span class="live-count">${liveCount} game${liveCount === 1 ? '' : 's'} in progress now</span> <span class="muted" style="font-size:11px">— live inning &amp; score from MLB</span></div>`;
+    } else if (pg.actionRanking.length) {
+      html += `<div style="margin:2px 0 6px" class="muted" style="font-size:12px">⏰ No games live yet — upcoming games show their start time.</div>`;
+    }
   } else {
     html += '<div style="font-weight:800;margin-bottom:6px">🔴 LIVE GAME BOARD <span class="muted" style="font-weight:500">— ⚪ simulation; prices drift on refresh, game states illustrative</span></div>';
   }
@@ -968,7 +970,11 @@ function renderLiveGame(pg) {
     '<span class="muted" style="font-size:12px">click a game to select, then jump in</span>' +
     '<button class="sm" onclick="openSelectedNow()">⚡ Open selected now</button>' +
     '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button></div>';
-  if (!pg.actionRanking.length) html += '<p class="muted">No live games right now.</p>';
+  if (!pg.actionRanking.length) {
+    html += live
+      ? '<p class="muted">✅ No games left today — all of today\'s MLB games are final (or none are on the board yet). Tomorrow\'s slate appears once those games are underway.</p>'
+      : '<p class="muted">No live games right now.</p>';
+  }
   // Live games first so they're front-and-center.
   const rows = live ? [...pg.actionRanking].sort((a, b) => (b.live === true) - (a.live === true)) : pg.actionRanking;
   rows.forEach((it) => {

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
-import { signKalshi, KalshiMarketProvider, dollarsToCents, normalizeMarket } from '../src/data/kalshiMarketProvider.js';
+import { signKalshi, KalshiMarketProvider, dollarsToCents, normalizeMarket, mlbTickerDate } from '../src/data/kalshiMarketProvider.js';
 
 const pssVerify = (publicKey, msg, sigB64) =>
   crypto.verify('sha256', Buffer.from(msg), {
@@ -38,6 +38,14 @@ test('configured Kalshi provider reports verified + ready to sign', () => {
   assert.equal(k.isConfigured, true);
   assert.equal(k.verified, true);
   assert.equal(k.source, 'KALSHI');
+});
+
+test('mlbTickerDate reads the reliable game date from the ticker', () => {
+  assert.equal(mlbTickerDate('KXMLBGAME-26AUG161920SEAHOU-SEA'), '2026-08-16');
+  assert.equal(mlbTickerDate('KXMLBGAME-26AUG171340STLCING1-STL'), '2026-08-17');
+  assert.equal(mlbTickerDate('KXMLBGAME-25DEC0159XYZ-YES'), '2025-12-01');
+  assert.equal(mlbTickerDate('NOT-A-GAME'), null);
+  assert.equal(mlbTickerDate(null), null);
 });
 
 test('dollarsToCents parses the API dollar strings, never invents on blanks', () => {

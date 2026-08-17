@@ -25,6 +25,19 @@ export const KALSHI_DEMO = 'https://external-api.demo.kalshi.co/trade-api/v2';
 /** Kalshi's MLB "game winner" series (each event = one game, one market per team side). */
 export const KALSHI_MLB_SERIES = 'KXMLBGAME';
 
+const TICKER_MONTHS = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
+/**
+ * The game DATE encoded in an MLB ticker, e.g. "KXMLBGAME-26AUG161920SEAHOU-SEA" -> "2026-08-16".
+ * This is the reliable game day (Kalshi's occurrence_datetime field can be hours off), so we
+ * use it to scope the board to today and reject future-day duplicates of the same matchup.
+ */
+export function mlbTickerDate(ticker) {
+  const m = /KXMLBGAME-(\d{2})([A-Z]{3})(\d{2})/.exec(ticker || '');
+  if (!m) return null;
+  const mm = TICKER_MONTHS[m[2]];
+  return mm ? `20${m[1]}-${mm}-${m[3]}` : null;
+}
+
 /**
  * Kalshi's v2 API returns money as dollar STRINGS ("0.4700"), not integer cents.
  * Convert to integer cents; return null for missing/blank so we never invent a price.

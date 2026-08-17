@@ -22,7 +22,7 @@ import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js
 import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
-import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO } from '../data/kalshiMarketProvider.js';
+import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, mlbTickerDate } from '../data/kalshiMarketProvider.js';
 import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr } from '../data/mlbLiveFeed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -77,39 +77,59 @@ function mlbGamesToCandidates(games, now = Date.now()) {
   return board;
 }
 
-// Overlay authoritative MLB game state (live?/inning/score) onto the Kalshi board.
-// MLB StatsAPI wins over the unreliable Kalshi scheduled-start heuristic; if it's
-// unreachable we silently keep the heuristic so the board still works.
+// Apply one authoritative MLB game's state (inning/score) to a board candidate.
+function annotateFromSchedule(c, g) {
+  c.mlbMatched = true;
+  c.mlbState = g.state;
+  if (g.state === 'Live') {
+    c.live = true;
+    c.gameState = `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
+  } else if (g.state === 'Final') {
+    c.live = false;
+    c.gameState = `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
+  } else {
+    c.live = false; // Preview / scheduled — not started yet, keep the start time
+    c.gameState = null;
+  }
+}
+
+// Fallback overlay when the MLB feed is unreachable: keep the occurrence heuristic.
 async function annotateLive(board, nowMs) {
   let games;
   try { games = await fetchLiveGames(etDateStr(nowMs)); }
   catch { return; }
   for (const c of board) {
     const g = findGameFor(games, nickFromKalshi(c.team), nickFromKalshi(c.opponent));
-    if (!g) continue;
-    c.mlbMatched = true;
-    if (g.state === 'Live') {
-      c.live = true;
-      c.gameState = `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
-    } else if (g.state === 'Final') {
-      c.live = false;
-      c.gameState = `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
-    } else {
-      c.live = false; // Preview / scheduled — not started yet, keep the start time
-      c.gameState = null;
-    }
+    if (g) annotateFromSchedule(c, g);
   }
 }
 
 async function liveMlbBoard({ force = false } = {}) {
   const now = Date.now();
   if (!force && now - liveCache.at < LIVE_TTL_MS && liveCache.board.length) return liveCache.board;
-  // Today's slate: games in progress (started up to 6h ago) through the next ~20h.
-  const games = await kalshiProvider().listMlbGames({
-    status: 'open', limit: 300, withinHoursBehind: 6, withinHoursAhead: 20,
-  });
-  const board = mlbGamesToCandidates(games, kalshiProvider().serverNow());
-  await annotateLive(board, kalshiProvider().serverNow());
+  const nowMs = kalshiProvider().serverNow();
+  const today = etDateStr(nowMs);
+
+  // Scope to TODAY by the date baked into the ticker (reliable), which also drops
+  // future-day duplicates of the same matchup.
+  const games = await kalshiProvider().listMlbGames({ status: 'open', limit: 400 });
+  let board = mlbGamesToCandidates(games, nowMs).filter((c) => mlbTickerDate(c.ticker) === today);
+
+  // Authoritative live state from the MLB feed; drop games that are already Final so the
+  // board only shows what you can still act on. If the feed is down, keep the heuristic.
+  let schedule = null;
+  try { schedule = await fetchLiveGames(today); } catch { schedule = null; }
+  if (schedule && schedule.length) {
+    board = board.filter((c) => {
+      const g = findGameFor(schedule, nickFromKalshi(c.team), nickFromKalshi(c.opponent));
+      if (g && g.state === 'Final') return false; // finished — not actionable
+      if (g) annotateFromSchedule(c, g);
+      return true;
+    });
+  } else {
+    await annotateLive(board, nowMs);
+  }
+
   liveCache = { at: now, board };
   return board;
 }
