@@ -319,8 +319,13 @@ async function applyMode() {
   // and reveal live-only controls (auto-refresh) instead.
   document.querySelectorAll('.sim-only').forEach((b) => { b.style.display = isLive() ? 'none' : ''; });
   document.querySelectorAll('.live-only').forEach((b) => { b.style.display = isLive() ? (b.dataset.liveDisplay || '') : 'none'; });
-  if (!isLive()) stopAutoLive();
-  if (isLive()) stopPlay(); // never leave a sim clock running in live mode
+  if (isLive()) {
+    stopPlay();                         // never leave a sim clock running in live mode
+    if (autoLivePref) startAutoLive();  // auto-refresh is ON by default in live mode
+    else setAutoLiveUI(false);
+  } else {
+    stopAutoLive();
+  }
   if (!banner) return;
   if (!isLive()) { banner.style.display = 'none'; return; }
   banner.style.display = '';
@@ -592,8 +597,9 @@ function playPause() {
 function setSpeed() { if (playTimer) { stopPlay(); playPause(); } }
 
 // LIVE mode auto-refresh: gently re-pull real Kalshi prices on a timer (no simulation,
-// never settles positions). Distinct from the simulation "Play" clock.
+// never settles positions). ON by default in live mode and remembered across reloads.
 let autoLiveTimer = null;
+let autoLivePref = localStorage.getItem('autoLive') !== 'false'; // default ON
 // Reflect the on/off state across every auto-refresh control (Live Board + Live Data).
 function setAutoLiveUI(on) {
   document.querySelectorAll('.auto-live-btn').forEach((b) => {
@@ -601,10 +607,6 @@ function setAutoLiveUI(on) {
     b.classList.toggle('on', on);
   });
   if (!on) document.querySelectorAll('.auto-live-status').forEach((s) => { s.innerHTML = ''; });
-}
-function stopAutoLive() {
-  if (autoLiveTimer) { clearInterval(autoLiveTimer); autoLiveTimer = null; }
-  setAutoLiveUI(false);
 }
 async function autoLiveTick() {
   await refresh().catch(() => {});
@@ -614,11 +616,21 @@ async function autoLiveTick() {
     s.classList.remove('flash-good'); void s.offsetWidth; s.classList.add('flash-good'); // re-trigger flash
   });
 }
-function toggleAutoLive() {
-  if (autoLiveTimer) { stopAutoLive(); return; }
+function startAutoLive() {
+  if (autoLiveTimer || !isLive()) return;
   setAutoLiveUI(true);
   autoLiveTick();
   autoLiveTimer = setInterval(autoLiveTick, 12000);
+}
+function stopAutoLive() {
+  if (autoLiveTimer) { clearInterval(autoLiveTimer); autoLiveTimer = null; }
+  setAutoLiveUI(false);
+}
+// User toggle: also remembers the preference so it stays on (or off) across reloads.
+function toggleAutoLive() {
+  autoLivePref = !autoLiveTimer;
+  localStorage.setItem('autoLive', autoLivePref);
+  if (autoLivePref) startAutoLive(); else stopAutoLive();
 }
 async function simulateToFinal() {
   stopPlay();
@@ -735,7 +747,7 @@ function renderMissed(m) {
   sum.innerHTML = `Left on the table (skipped wins): <b class="neg">${fmt(m.regretCents)}</b> · ` +
     `dodged (skipped losses): <b class="pos">${fmt(m.dodgedCents)}</b> · ` +
     `net regret: <b class="${m.netCents > 0 ? 'neg' : 'pos'}">${fmt(m.netCents)}</b> · ${m.pending} pending`;
-  let html = '<table><thead><tr><th>Team</th><th>Kind</th><th>Price</th><th>Would-win</th><th>Outcome</th><th>Resolve</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Pick</th><th>Kind</th><th>Price</th><th>Would-win</th><th>Outcome</th><th>Resolve</th></tr></thead><tbody>';
   for (const it of m.items) {
     const status = it.status === 'won' ? '<span class="neg">WON — missed it</span>'
       : it.status === 'lost' ? '<span class="pos">LOST — dodged it</span>'
@@ -745,7 +757,7 @@ function renderMissed(m) {
          <button class="sm ghost" onclick="resolveMissed('${it.id}','win')">Won</button>
          <button class="sm ghost" onclick="resolveMissed('${it.id}','loss')">Lost</button>`
       : '<span class="muted">—</span>';
-    html += `<tr><td>${it.team}</td><td>${it.kind}</td><td>${it.priceCents ?? '—'}¢</td><td class="pos">+${fmt(it.potentialProfitCents)}</td><td>${status}</td><td>${actions}</td></tr>`;
+    html += `<tr><td>${pickText(it)}</td><td>${it.kind}</td><td>${it.priceCents ?? '—'}¢</td><td class="pos">+${fmt(it.potentialProfitCents)}</td><td>${status}</td><td>${actions}</td></tr>`;
   }
   html += '</tbody></table>';
   el.innerHTML = html;
@@ -968,7 +980,7 @@ function renderLiveGame(pg) {
     else if (it.gameState && /Final/.test(it.gameState)) stateChip = `<span class="upcoming">🏁 ${it.gameState}</span>`;
     else if (startTxt) stateChip = `<span class="upcoming">⏰ ${startTxt}</span>`;
     html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="togglePick(this)">
-        <div>${badge}<span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''} ${stateChip}
+        <div>${badge}<span class="medal">${it.medal}</span> ${pickText(it)} ${stateChip}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         <div class="why">${it.why}</div>
         ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}
@@ -1090,12 +1102,12 @@ function renderPreGame(pg) {
   }
 
   // quick board (edge/value first)
-  html += '<table><thead><tr><th></th><th>Team</th><th>Kalshi</th><th>Your&nbsp;%</th><th>Edge</th><th>EV</th><th>Payout</th><th>Stake</th><th>%cash</th></tr></thead><tbody>';
+  html += '<table><thead><tr><th></th><th>Pick</th><th>Kalshi</th><th>Your&nbsp;%</th><th>Edge</th><th>EV</th><th>Payout</th><th>Stake</th><th>%cash</th></tr></thead><tbody>';
   for (const r of pg.quickBoard) {
     const badge = r.verified ? '<span title="real Kalshi price">🟢</span> ' : '';
     const label = r.kind === 'combo'
-      ? `${r.team} <span class="muted">(combo: ${(r.legs || []).map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')})</span>`
-      : `${badge}${r.team ?? ''}${r.opponent ? ' <span class="muted">vs ' + r.opponent + '</span>' : ''} <span class="muted">(single)</span>`;
+      ? `🎯 <b>${r.team}</b> <span class="muted">(parlay: ${(r.legs || []).map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}; all must win)</span>`
+      : `${badge}${pickText(r)}`;
     const edgeCls = r.edgePct > 0 ? 'pos' : r.edgePct < 0 ? 'neg' : '';
     html += `<tr>
       <td class="medal">${r.medal}</td>
@@ -1137,7 +1149,7 @@ function renderPreGame(pg) {
 
   pg.actionRanking.forEach((it, i) => {
     html += `<div class="pick-card" data-src="pre" data-i="${i}" onclick="togglePick(this)">
-        <div><span class="medal">${it.medal}</span> <b>${it.team ?? it.ticker}</b>${it.opponent ? ' <span class="muted">vs ' + it.opponent + '</span>' : ''}
+        <div><span class="medal">${it.medal}</span> ${pickText(it)}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         ${it.legs ? `<div class="muted" style="font-size:11px">combo legs: ${it.legs.map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}</div>` : ''}
         <div class="why">${it.why}</div>
@@ -1161,7 +1173,7 @@ function renderRanking(r) {
   r.ranked.forEach((it, i) => {
     html += `<tr class="rankrow" onclick="openQuickPick(${i})" title="Click to enter this position">
       <td class="medal">${it.medal}</td>
-      <td>${it.team ?? it.ticker}${it.opponent ? ' vs ' + it.opponent : ''} <span class="muted">(${it.kind})</span></td>
+      <td>${pickText(it)}</td>
       <td><b>${it.score}</b></td>
       <td>${it.marketProbabilityPct}%</td>
       <td>${fmt(it.riskCents)}</td>
