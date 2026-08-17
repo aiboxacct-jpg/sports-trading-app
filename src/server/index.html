@@ -105,6 +105,10 @@
     animation: livepulse 1.1s ease-in-out infinite; }
   .live-count { color: var(--bad); font-weight: 800; animation: livepulse 1.1s ease-in-out infinite; }
   .upcoming { color: var(--muted); font-size: 11px; font-weight: 600; }
+  button.on { background: var(--good) !important; color: #fff !important; border-color: var(--good) !important; }
+  #autoLiveStatus .dot { color: var(--good); animation: livepulse 1.1s ease-in-out infinite; }
+  @keyframes flashgood { 0% { background: #d7f5e0; } 100% { background: transparent; } }
+  .flash-good { animation: flashgood .9s ease-out; }
 </style>
 </head>
 <body>
@@ -204,6 +208,7 @@
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="refreshLiveGames()">🔄 Refresh prices</button></div>
         <div class="live-only" style="flex:0 0 auto;display:none"><label>&nbsp;</label><button class="sm" id="autoLiveBtn" onclick="toggleAutoLive()">▶ Auto-refresh live</button></div>
+        <div class="live-only" style="flex:0 0 auto;display:none"><label>&nbsp;</label><span id="autoLiveStatus" style="font-size:12px"></span></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="newSlate()">🎲 New slate</button></div>
       </div>
       <div class="err" id="livegameErr"></div>
@@ -568,13 +573,22 @@ function setSpeed() { if (playTimer) { stopPlay(); playPause(); } }
 let autoLiveTimer = null;
 function stopAutoLive() {
   if (autoLiveTimer) { clearInterval(autoLiveTimer); autoLiveTimer = null; }
-  const b = $('autoLiveBtn'); if (b) b.textContent = '▶ Auto-refresh live';
+  const b = $('autoLiveBtn'); if (b) { b.textContent = '▶ Auto-refresh live'; b.classList.remove('on'); }
+  const s = $('autoLiveStatus'); if (s) s.innerHTML = '';
+}
+async function autoLiveTick() {
+  await refresh().catch(() => {});
+  const s = $('autoLiveStatus');
+  if (s) {
+    s.innerHTML = `<span class="dot">🟢</span> live · updated ${new Date().toLocaleTimeString()}`;
+    s.classList.remove('flash-good'); void s.offsetWidth; s.classList.add('flash-good'); // re-trigger flash
+  }
 }
 function toggleAutoLive() {
   if (autoLiveTimer) { stopAutoLive(); return; }
-  const b = $('autoLiveBtn'); if (b) b.textContent = '⏸ Stop auto-refresh';
-  refresh();
-  autoLiveTimer = setInterval(() => refresh().catch(() => {}), 12000);
+  const b = $('autoLiveBtn'); if (b) { b.textContent = '⏸ Auto-refresh ON'; b.classList.add('on'); }
+  autoLiveTick();
+  autoLiveTimer = setInterval(autoLiveTick, 12000);
 }
 async function simulateToFinal() {
   stopPlay();
