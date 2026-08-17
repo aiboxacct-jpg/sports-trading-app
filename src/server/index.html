@@ -391,13 +391,23 @@ function renderSnapshot(snap) {
     const near = up != null && t.targetCents > 0 && up >= 0.7 * t.targetCents && up < t.targetCents;
     const pickLabel = pickText(p);
     const kindLabel = p.kind === 'combo' ? 'combo (parlay)' : 'single';
+    // Game state: in live mode show the real inning + score as readable text (it auto-syncs
+    // from the MLB feed); in sim mode keep the editable box for manual entry.
+    const gsRaw = p.currentGameState ?? '';
+    const gsSafe = gsRaw.replace(/</g, '&lt;');
+    const gsIsInning = /^(Top|Mid|Bot|End)\b/.test(gsRaw);
+    const gsIsFinal = /^Final/.test(gsRaw);
+    const gsCell = isLive()
+      ? (gsRaw
+          ? `<span style="font-size:12px;${gsIsInning ? 'color:var(--bad);font-weight:600' : gsIsFinal ? 'color:var(--muted);font-weight:600' : 'color:var(--muted)'}">${gsIsInning ? '🔴 ' : gsIsFinal ? '🏁 ' : ''}${gsSafe}</span>`
+          : '<span class="muted" style="font-size:12px">waiting for first pitch…</span>')
+      : `<input id="gs-${p.id}" value="${gsRaw.replace(/"/g, '&quot;')}" placeholder="Top 5, 2 out" style="width:120px"><button class="sm ghost" onclick="setState('${p.id}')">Set</button>`;
     return `<tr class="${near ? 'approaching' : ''}">
       <td>${pickLabel}
         <span class="status-open">[open]</span>${near ? ' <span class="nearflag">🔴 near target</span>' : ''}<br>
         <span class="muted" style="font-size:11px">${kindLabel} · ${p.contracts} contract${p.contracts === 1 ? '' : 's'} @ ${p.entryPriceCents}¢ · <span title="Kalshi market ID: series · date · start time · matchup · the side you hold">${p.ticker}</span></span></td>
       <td>${p.entryPriceCents}¢</td>
-      <td><input id="gs-${p.id}" value="${(p.currentGameState ?? '').replace(/"/g,'&quot;')}" placeholder="Top 5, 2 out" style="width:120px">
-        <button class="sm ghost" onclick="setState('${p.id}')">Set</button></td>
+      <td>${gsCell}</td>
       <td><input type="number" id="np-${p.id}" value="${now}" min="1" max="99" style="width:60px">
         <button class="sm ghost" onclick="setPrice('${p.ticker}','np-${p.id}')">Set¢</button></td>
       <td><b>${payoutX}×</b></td>
