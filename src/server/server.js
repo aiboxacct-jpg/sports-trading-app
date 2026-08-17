@@ -435,6 +435,30 @@ const api = {
     };
   },
 
+  // Sync OPEN positions to live data: real Kalshi price (by ticker) + real MLB game
+  // state (inning/score, by matchup). Read-only — never auto-settles; the user decides.
+  'POST /api/live/sync': async () => {
+    const board = await liveMlbBoard();
+    const priceByTicker = new Map(board.map((c) => [c.ticker, c.priceCents]));
+    let games = [];
+    try { games = await fetchLiveGames(etDateStr(kalshiProvider().serverNow())); } catch { /* keep going */ }
+    let priced = 0, stated = 0;
+    for (const p of engine.positions) {
+      if (p.status !== 'open') continue;
+      const px = priceByTicker.get(p.ticker);
+      if (px != null) { engine.setPrice(p.ticker, px); priced++; }
+      const g = findGameFor(games, nickFromKalshi(p.team), nickFromKalshi(p.opponent));
+      if (g) {
+        const gs = g.state === 'Live' ? `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
+          : g.state === 'Final' ? `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
+          : null;
+        if (gs) { engine.setGameState(p.id, gs); stated++; }
+      }
+    }
+    const snapshot = engine.snapshot();
+    return { snapshot, goalPath: computeGoalPath(snapshot), synced: { priced, stated } };
+  },
+
   // Force a fresh pull (bypass the cache), e.g. on "u"/"update"/"refresh".
   'POST /api/live/refresh': async (body) => {
     const board = await liveMlbBoard({ force: true });
@@ -534,7 +558,7 @@ const api = {
 const MUTATING = new Set([
   '/api/reset', '/api/clear', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
   '/api/missed/log', '/api/missed/resolve', '/api/missed/clear',
-  '/api/livegame/refresh', '/api/livegame/tick', '/api/livegame/new',
+  '/api/livegame/refresh', '/api/livegame/tick', '/api/livegame/new', '/api/live/sync',
 ]);
 
 // ---- request routing ------------------------------------------------------
