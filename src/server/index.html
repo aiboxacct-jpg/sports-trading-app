@@ -378,10 +378,16 @@ function renderSnapshot(snap) {
     // pulse red when this position's unrealized profit is closing in on the target
     const up = p.unrealizedPureProfitCents;
     const near = up != null && t.targetCents > 0 && up >= 0.7 * t.targetCents && up < t.targetCents;
+    const isCombo = p.kind === 'combo';
+    // Make the actual pick unmistakable: which side you're holding, single vs parlay.
+    const pickLabel = isCombo
+      ? `🎯 Parlay: <b>${p.team}</b> <span class="muted">(all legs must win)</span>`
+      : `🎯 <b>${p.team}</b> to win${p.opponent ? ` <span class="muted">vs ${p.opponent}</span>` : ''}`;
+    const kindLabel = isCombo ? 'combo (parlay)' : 'single';
     return `<tr class="${near ? 'approaching' : ''}">
-      <td>${p.team ?? p.ticker}${p.opponent ? ' vs ' + p.opponent : ''}
+      <td>${pickLabel}
         <span class="status-open">[open]</span>${near ? ' <span class="nearflag">🔴 near target</span>' : ''}<br>
-        <span class="muted" style="font-size:11px">${p.ticker} · ${p.contracts}× · ${p.kind}</span></td>
+        <span class="muted" style="font-size:11px">${kindLabel} · ${p.contracts} contract${p.contracts === 1 ? '' : 's'} @ ${p.entryPriceCents}¢ · <span title="Kalshi market ID: series · date · start time · matchup · the side you hold">${p.ticker}</span></span></td>
       <td>${p.entryPriceCents}¢</td>
       <td><input id="gs-${p.id}" value="${(p.currentGameState ?? '').replace(/"/g,'&quot;')}" placeholder="Top 5, 2 out" style="width:120px">
         <button class="sm ghost" onclick="setState('${p.id}')">Set</button></td>
