@@ -34,6 +34,11 @@
   .wrap { overflow-x: auto; }
   .kinds { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; margin-bottom: 6px; }
   @media (max-width: 780px) { .kpi { grid-template-columns: repeat(3, 1fr); } }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px;
+    padding: 7px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tabpanel { display: none; } .tabpanel.active { display: block; }
 </style>
 </head>
 <body>
@@ -115,11 +120,23 @@ async function load() {
     document.getElementById('content').innerHTML = '<p class="neg">Could not load history: ' + e.message + '</p>';
     return;
   }
-  let html = '<p class="muted" style="font-size:13px;margin-bottom:6px">Two separate ledgers — Simulation and Live are never mixed. Each survives restarts and is wiped only by its own “Clear all”.</p>';
-  html += renderLedger(live, '🔴 Live decisions', 'Real Kalshi decisions');
-  html += '<div style="height:24px"></div>';
-  html += renderLedger(sim, '⚪ Simulation decisions', 'Practice decisions');
+  // Separate tabs — Simulation and Live are never mixed. Default to ?mode= (from the
+  // dashboard link), else Simulation.
+  const params = new URLSearchParams(location.search);
+  const start = params.get('mode') === 'live' ? 'live' : 'sim';
+  let html = '<div class="tabs">' +
+    `<button class="tab" data-tab="sim" onclick="showTab('sim')">⚪ Simulation</button>` +
+    `<button class="tab" data-tab="live" onclick="showTab('live')">🔴 Live</button>` +
+    '</div>';
+  html += `<div class="tabpanel" id="tab-sim">${renderLedger(sim, '⚪ Simulation decisions', 'Practice decisions')}</div>`;
+  html += `<div class="tabpanel" id="tab-live">${renderLedger(live, '🔴 Live decisions', 'Real Kalshi decisions')}</div>`;
+  html += '<p class="muted" style="font-size:12px;margin-top:16px">Two separate ledgers — Simulation and Live are never mixed. Each survives restarts and is wiped only by its own “Clear all”.</p>';
   document.getElementById('content').innerHTML = html;
+  showTab(start);
+}
+function showTab(which) {
+  for (const el of document.querySelectorAll('.tab')) el.classList.toggle('active', el.dataset.tab === which);
+  for (const el of document.querySelectorAll('.tabpanel')) el.classList.toggle('active', el.id === 'tab-' + which);
 }
 load();
 </script>

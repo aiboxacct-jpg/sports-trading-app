@@ -118,7 +118,7 @@
     <button id="modeSim" class="modebtn active" onclick="setMode('sim')">⚪ Simulation</button>
     <button id="modeLive" class="modebtn" onclick="setMode('live')">🔴 Live Play</button>
   </span>
-  <a href="/history" style="margin-left:auto;color:var(--accent);text-decoration:none;font-weight:600;font-size:14px">📊 History</a>
+  <a id="historyLink" href="/history" style="margin-left:auto;color:var(--accent);text-decoration:none;font-weight:600;font-size:14px">📊 History</a>
   <a href="/spec" style="color:var(--accent);text-decoration:none;font-weight:600;font-size:14px">📋 Spec</a>
 </header>
 
@@ -322,6 +322,8 @@ async function applyMode() {
   const s = $('modeSim'), l = $('modeLive'), banner = $('liveBanner');
   if (s) s.classList.toggle('active', appMode === 'sim');
   if (l) l.classList.toggle('active', appMode === 'live');
+  // History link opens the tab for the current mode.
+  const hist = $('historyLink'); if (hist) hist.href = '/history?mode=' + appMode;
   // Hide simulation-only clock controls in live mode (real games don't take a fake clock),
   // and reveal live-only controls (auto-refresh) instead.
   document.querySelectorAll('.sim-only').forEach((b) => { b.style.display = isLive() ? 'none' : ''; });
