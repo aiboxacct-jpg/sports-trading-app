@@ -23,7 +23,7 @@ import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
 import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
-import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr, winnerNick } from '../data/mlbLiveFeed.js';
+import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr, winnerNick, isInProgress } from '../data/mlbLiveFeed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
@@ -82,14 +82,14 @@ function mlbGamesToCandidates(games, now = Date.now()) {
 function annotateFromSchedule(c, g) {
   c.mlbMatched = true;
   c.mlbState = g.state;
-  if (g.state === 'Live') {
+  if (isInProgress(g)) {
     c.live = true;
     c.gameState = `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
   } else if (g.state === 'Final') {
     c.live = false;
     c.gameState = `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
   } else {
-    c.live = false; // Preview / scheduled — not started yet, keep the start time
+    c.live = false; // Preview / scheduled / warmup — not underway yet, keep the start time
     c.gameState = null;
   }
 }
@@ -511,9 +511,9 @@ const api = {
       const px = priceByTicker.get(p.ticker);
       if (px != null) { engine.setPrice(p.ticker, px); priced++; }
       if (g) {
-        // Live -> inning + score; Final(tie/rare) -> final; not started yet -> clear any
-        // stale state (e.g. a doubleheader's other game) so it doesn't show a wrong score.
-        const gs = g.state === 'Live' ? `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
+        // In progress -> inning + score; Final(tie/rare) -> final; not underway yet
+        // (warmup / scheduled / other DH game) -> clear so it never shows a wrong score.
+        const gs = isInProgress(g) ? `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
           : g.state === 'Final' ? `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
           : '';
         engine.setGameState(p.id, gs); stated++;

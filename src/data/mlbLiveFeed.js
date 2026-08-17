@@ -37,6 +37,17 @@ export function nickFromStatsName(name) {
   return NICKS.find((n) => name.includes(n)) || null;
 }
 
+/**
+ * Whether a game is ACTUALLY underway (pitches being thrown). MLB's abstractGameState
+ * flips to "Live" during pre-first-pitch states (Warmup, Pre-Game, Delayed Start), which
+ * are NOT in progress — so exclude those. Real play is detailedState "In Progress"
+ * (and its sub-states like Manager Challenge / Replay Review).
+ */
+export function isInProgress(g) {
+  if (!g || g.state !== 'Live') return false;
+  return !/warm-?up|pre-?game|delayed start|scheduled/i.test(g.detailed || '');
+}
+
 /** Short inning label, e.g. "Mid 3rd" / "Top 5th". Falls back to the detailed state. */
 export function inningLabel(g) {
   if (!g.ordinal) return g.detailed || 'Live';

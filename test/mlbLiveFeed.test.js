@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   nickFromKalshi, nickFromStatsName, inningLabel,
-  normalizeScheduleGames, findGameFor, etDateStr, fetchLiveGames, winnerNick,
+  normalizeScheduleGames, findGameFor, etDateStr, fetchLiveGames, winnerNick, isInProgress,
 } from '../src/data/mlbLiveFeed.js';
 
 test('nickFromKalshi maps disambiguated shared-city labels', () => {
@@ -61,6 +61,17 @@ test('findGameFor picks the right game of a doubleheader by game number', () => 
   assert.equal(findGameFor(games, 'Cardinals', 'Reds', 2), g2); // scheduled game 2 (not g1!)
   assert.equal(findGameFor(games, 'Cardinals', 'Reds'), g1);    // no number -> first match
   assert.equal(findGameFor(games, 'Cardinals', 'Reds', 3), null); // no such game
+});
+
+test('isInProgress excludes warmup/pre-game (abstractGameState is "Live" too early)', () => {
+  assert.equal(isInProgress({ state: 'Live', detailed: 'In Progress' }), true);
+  assert.equal(isInProgress({ state: 'Live', detailed: 'Manager challenge' }), true);
+  assert.equal(isInProgress({ state: 'Live', detailed: 'Warmup' }), false); // not underway
+  assert.equal(isInProgress({ state: 'Live', detailed: 'Pre-Game' }), false);
+  assert.equal(isInProgress({ state: 'Live', detailed: 'Delayed Start' }), false);
+  assert.equal(isInProgress({ state: 'Preview', detailed: 'Scheduled' }), false);
+  assert.equal(isInProgress({ state: 'Final', detailed: 'Final' }), false);
+  assert.equal(isInProgress(null), false);
 });
 
 test('winnerNick picks the winner only for a decisive final game', () => {
