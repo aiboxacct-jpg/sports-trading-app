@@ -140,11 +140,14 @@ function liveBaseLabel(url) {
   return url ?? 'PRODUCTION';
 }
 
-// ---- state: loaded from disk on boot, saved after every change ------------
-let engine;
-let simHistory;   // SIMULATION decision history — kept SEPARATE from any live history
-let missed;       // 👻 missed-opportunity ledger
-let liveBoard;    // 🔴 games "in progress" you can jump into (simulated; a live feed fills this later)
+// ---- state: TWO fully separate books — SIMULATION and LIVE never share a bankroll,
+// positions, or decision history. `book(mode)` picks one; each persists to disk.
+const books = {
+  sim:  { engine: null, history: [], missed: [] },
+  live: { engine: null, history: [], missed: [] },
+};
+const book = (mode) => books[mode === 'live' ? 'live' : 'sim'];
+let liveBoard;    // 🔴 simulated daily slate (SIMULATION mode only)
 
 // MLB inning label for a live-board step (0..17 = Top 1 .. Bot 9).
 function liveInningLabel(step) {
@@ -189,24 +192,36 @@ function generateLiveBoard(exclude = new Set()) {
   return board;
 }
 
+function loadBook(s) {
+  return {
+    engine: s && s.engine ? SimEngine.fromState(s.engine) : newEngine({ startingDollars: 100, targetDollars: 5 }),
+    history: Array.isArray(s && s.history) ? s.history : [],
+    missed: Array.isArray(s && s.missed) ? s.missed : [],
+  };
+}
 const saved = loadState(STATE_FILE);
-if (saved && saved.engine) {
-  engine = SimEngine.fromState(saved.engine);
-  simHistory = Array.isArray(saved.simHistory) ? saved.simHistory : [];
-  missed = Array.isArray(saved.missed) ? saved.missed : [];
+if (saved && saved.version === 2) {
+  books.sim = loadBook(saved.sim);
+  books.live = loadBook(saved.live);
   liveBoard = Array.isArray(saved.liveBoard) && saved.liveBoard.length ? saved.liveBoard : generateLiveBoard();
-  console.log(`↺ restored state: ${engine.positions.length} positions, ${simHistory.length} decisions, ${missed.length} missed`);
+} else if (saved && saved.engine) {
+  // Migrate v1 (single shared ledger). That ledger was used for LIVE play, so it becomes
+  // the LIVE book; SIMULATION starts clean so the two are finally separate.
+  books.live = loadBook({ engine: saved.engine, history: saved.simHistory, missed: saved.missed });
+  books.sim = loadBook(null);
+  liveBoard = Array.isArray(saved.liveBoard) && saved.liveBoard.length ? saved.liveBoard : generateLiveBoard();
+  console.log('↺ migrated v1 ledger -> LIVE book; SIMULATION reset clean (separation fix)');
 } else {
-  engine = newEngine({ startingDollars: 100, targetDollars: 5 });
-  simHistory = [];
-  missed = [];
+  books.sim = loadBook(null);
+  books.live = loadBook(null);
   liveBoard = generateLiveBoard();
 }
+console.log(`↺ sim: ${books.sim.engine.positions.length} pos / ${books.sim.history.length} decisions · live: ${books.live.engine.positions.length} pos / ${books.live.history.length} decisions`);
 
-// Teams (and their opponents) currently in open positions — kept out of new slates.
+// Teams (and their opponents) currently in open SIM positions — kept out of new slates.
 function heldTeams() {
   const s = new Set();
-  for (const p of engine.positions) {
+  for (const p of books.sim.engine.positions) {
     if (p.status !== 'open') continue;
     if (p.team) s.add(p.team);
     if (p.opponent) s.add(p.opponent);
@@ -222,15 +237,20 @@ function driftLiveBoard() {
 }
 
 function persist() {
-  saveState(STATE_FILE, { version: 1, engine: engine.toState(), simHistory, missed, liveBoard });
+  saveState(STATE_FILE, {
+    version: 2,
+    sim: { engine: books.sim.engine.toState(), history: books.sim.history, missed: books.sim.missed },
+    live: { engine: books.live.engine.toState(), history: books.live.history, missed: books.live.missed },
+    liveBoard,
+  });
 }
 
 // minSample: 3 so the profile activates after a few games in a price bucket.
-const historicalEngine = () => new HistoricalDecisionEngine(simHistory, { minSample: 3 });
+const historicalEngine = (history) => new HistoricalDecisionEngine(history, { minSample: 3 });
 
 // 👻 Missed-opportunity ledger: picks you were shown but skipped.
 // regret = profit left on the table by skipped WINS; dodged = stake spared on skipped LOSSES.
-function missedSummary() {
+function missedSummary(missed) {
   const won = missed.filter((m) => m.status === 'won');
   const lost = missed.filter((m) => m.status === 'lost');
   const regretCents = won.reduce((a, m) => a + (m.potentialProfitCents || 0), 0);
@@ -245,10 +265,10 @@ function missedSummary() {
     netCents: regretCents - dodgedCents, // >0 means skipping cost you overall
   };
 }
-function recordDecision(pos) {
+function recordDecision(history, pos) {
   if (!pos) return;
   const committed = pos.committedCents ?? ((pos.costCents ?? 0) + (pos.entryFeeCents ?? 0));
-  simHistory.push({
+  history.push({
     ts: new Date().toISOString(),
     team: pos.team ?? pos.ticker ?? null,
     opponent: pos.opponent ?? null,
@@ -301,7 +321,7 @@ const int = (v) => {
 };
 
 // Normalize a candidate from the client; resolve missing prices from the market.
-function resolveCandidate(c, i) {
+function resolveCandidate(c, i, engine) {
   const base = {
     id: c.id || `cand-${i + 1}`, team: c.team, opponent: c.opponent,
     kind: c.kind === 'combo' ? 'combo' : 'single',
@@ -323,38 +343,42 @@ function sizingOpts(body) {
 }
 
 // ---- API ------------------------------------------------------------------
+// Every generic handler receives (body, mode); `mode` ('sim'|'live') selects the book,
+// so SIMULATION and LIVE never share a bankroll, positions, or history.
 const api = {
-  'GET /api/state': () => {
-    const snapshot = engine.snapshot();
-    return { snapshot, goalPath: computeGoalPath(snapshot) };
+  'GET /api/state': (body, mode) => {
+    const snapshot = book(mode).engine.snapshot();
+    return { snapshot, goalPath: computeGoalPath(snapshot), mode };
   },
 
-  'POST /api/reset': (body) => {
-    engine = newEngine({
+  'POST /api/reset': (body, mode) => {
+    book(mode).engine = newEngine({
       startingDollars: body.startingDollars ?? 100,
       targetDollars: body.targetDollars ?? 5,
     });
-    return { snapshot: engine.snapshot() };
+    return { snapshot: book(mode).engine.snapshot() };
   },
 
-  // Full clean slate: new bankroll AND wipe decision history, missed ledger, live board.
-  'POST /api/clear': (body) => {
-    engine = newEngine({
+  // Full clean slate for THIS mode only: new bankroll + wipe its history & missed ledger.
+  'POST /api/clear': (body, mode) => {
+    const bk = book(mode);
+    bk.engine = newEngine({
       startingDollars: body.startingDollars ?? 100,
       targetDollars: body.targetDollars ?? 5,
     });
-    simHistory.length = 0;
-    missed.length = 0;
-    liveBoard = generateLiveBoard();
-    return { snapshot: engine.snapshot() };
+    bk.history.length = 0;
+    bk.missed.length = 0;
+    if (mode !== 'live') liveBoard = generateLiveBoard();
+    return { snapshot: bk.engine.snapshot() };
   },
 
-  'POST /api/price': (body) => {
-    engine.setPrice(String(body.ticker), int(body.priceCents));
-    return { snapshot: engine.snapshot() };
+  'POST /api/price': (body, mode) => {
+    book(mode).engine.setPrice(String(body.ticker), int(body.priceCents));
+    return { snapshot: book(mode).engine.snapshot() };
   },
 
-  'POST /api/open': (body) => {
+  'POST /api/open': (body, mode) => {
+    const engine = book(mode).engine;
     const ticker = String(body.ticker);
     const entryPriceCents = int(body.priceCents);
     // Seed a current price so the position is immediately valued, unless one exists.
@@ -371,44 +395,48 @@ const api = {
     return { snapshot: engine.snapshot() };
   },
 
-  'POST /api/close': (body) => {
-    recordDecision(engine.close(String(body.id), int(body.exitPriceCents)));
-    return { snapshot: engine.snapshot() };
+  'POST /api/close': (body, mode) => {
+    const bk = book(mode);
+    recordDecision(bk.history, bk.engine.close(String(body.id), int(body.exitPriceCents)));
+    return { snapshot: bk.engine.snapshot() };
   },
 
-  'POST /api/settle': (body) => {
-    recordDecision(engine.settle(String(body.id), body.outcome === 'win' ? 'win' : 'loss'));
-    return { snapshot: engine.snapshot() };
+  'POST /api/settle': (body, mode) => {
+    const bk = book(mode);
+    recordDecision(bk.history, bk.engine.settle(String(body.id), body.outcome === 'win' ? 'win' : 'loss'));
+    return { snapshot: bk.engine.snapshot() };
   },
 
-  'POST /api/gamestate': (body) => {
-    engine.setGameState(String(body.id), String(body.gameState ?? ''));
-    return { snapshot: engine.snapshot() };
+  'POST /api/gamestate': (body, mode) => {
+    book(mode).engine.setGameState(String(body.id), String(body.gameState ?? ''));
+    return { snapshot: book(mode).engine.snapshot() };
   },
 
-  'GET /api/postgame': () => ({
-    postgame: sessionPostGame(engine.positions, { targetCents: engine.targetCents }),
+  'GET /api/postgame': (body, mode) => ({
+    postgame: sessionPostGame(book(mode).engine.positions, { targetCents: book(mode).engine.targetCents }),
   }),
 
-  'POST /api/pregame': (body) => {
-    const board = addCombos((body.board ?? []).map(resolveCandidate));
-    const mode = body.mode === 'LIVE' ? 'LIVE' : 'SIMULATION';
-    return { pregame: buildPreGameReport(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), mode, ...sizingOpts(body) }) };
+  'POST /api/pregame': (body, mode) => {
+    const bk = book(mode);
+    const board = addCombos((body.board ?? []).map((c, i) => resolveCandidate(c, i, bk.engine)));
+    const reportMode = mode === 'live' ? 'LIVE' : 'SIMULATION';
+    return { pregame: buildPreGameReport(bk.engine.snapshot(), board, { feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), mode: reportMode, ...sizingOpts(body) }) };
   },
 
+  // The SIMULATION daily slate (always the sim book).
   'POST /api/livegame': (body) => ({
-    livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }),
+    livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }),
   }),
 
   'POST /api/livegame/refresh': (body) => {
     driftLiveBoard();
-    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
+    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
   },
 
   // Pull a fresh random daily slate of live games.
   'POST /api/livegame/new': (body) => {
     liveBoard = generateLiveBoard(heldTeams());
-    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
+    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
   },
 
   // Advance the live board one clock step: drift prices + move each game's inning.
@@ -420,7 +448,7 @@ const api = {
       if (g.step > 17) { g.step = 0; g.priceCents = 40 + Math.floor(Math.random() * 21); } // new game
       g.gameState = liveInningLabel(g.step);
     }
-    return { livegame: buildPreGameReport(engine.snapshot(), liveBoard, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
+    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
   },
 
   // ---- LIVE Kalshi board (real prices, read-only) -------------------------
@@ -440,12 +468,13 @@ const api = {
     };
   },
 
-  // Real MLB board from Kalshi, ranked by the same edge/EV engine. mode: 'LIVE'.
+  // Real MLB board from Kalshi, ranked by the same edge/EV engine — always the LIVE book.
   'POST /api/live/board': async (body) => {
+    const bk = books.live;
     const board = await liveMlbBoard();
     return {
-      livegame: buildPreGameReport(engine.snapshot(), board, {
-        feeRate: engine.feeRate, historical: historicalEngine(), mode: 'LIVE', ...sizingOpts(body),
+      livegame: buildPreGameReport(bk.engine.snapshot(), board, {
+        feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), mode: 'LIVE', ...sizingOpts(body),
       }),
       candidates: board, // raw real-price board so ranking/pre-game/replacements can reuse it
       asOf: new Date(liveCache.at).toISOString(),
@@ -455,9 +484,10 @@ const api = {
     };
   },
 
-  // Sync OPEN positions to live data: real Kalshi price (by ticker) + real MLB game
-  // state (inning/score, by matchup). Read-only — never auto-settles; the user decides.
+  // Sync OPEN live positions to live data + auto-settle finished games — LIVE book only.
   'POST /api/live/sync': async () => {
+    const bk = books.live;
+    const engine = bk.engine;
     const board = await liveMlbBoard();
     const priceByTicker = new Map(board.map((c) => [c.ticker, c.priceCents]));
     let games = [];
@@ -467,12 +497,12 @@ const api = {
     for (const p of engine.positions) {
       if (p.status !== 'open') continue;
       const g = findGameFor(games, nickFromKalshi(p.team), nickFromKalshi(p.opponent));
-      // Auto-settle the PAPER ledger from the real result once the game is Final. This
-      // never touches real money on Kalshi — it only records the outcome you'd have had.
+      // Auto-settle the LIVE paper ledger from the real result once the game is Final.
+      // Never touches real money on Kalshi — only records the outcome you'd have had.
       const winner = winnerNick(g);
       if (winner) {
         const outcome = nickFromKalshi(p.team) === winner ? 'win' : 'loss';
-        recordDecision(engine.settle(p.id, outcome));
+        recordDecision(bk.history, engine.settle(p.id, outcome));
         autoSettled.push({ team: p.team, outcome, score: `${g.away} ${g.awayScore}–${g.homeScore} ${g.home}` });
         continue; // settled — no more price/state updates for this one
       }
@@ -491,10 +521,11 @@ const api = {
 
   // Force a fresh pull (bypass the cache), e.g. on "u"/"update"/"refresh".
   'POST /api/live/refresh': async (body) => {
+    const bk = books.live;
     const board = await liveMlbBoard({ force: true });
     return {
-      livegame: buildPreGameReport(engine.snapshot(), board, {
-        feeRate: engine.feeRate, historical: historicalEngine(), mode: 'LIVE', ...sizingOpts(body),
+      livegame: buildPreGameReport(bk.engine.snapshot(), board, {
+        feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), mode: 'LIVE', ...sizingOpts(body),
       }),
       candidates: board, // raw real-price board so ranking/pre-game/replacements can reuse it
       asOf: new Date(liveCache.at).toISOString(),
@@ -504,13 +535,14 @@ const api = {
     };
   },
 
-  'POST /api/replacements': (body) => {
-    const board = addCombos((body.board ?? []).map(resolveCandidate));
-    return { replacements: findReplacements(engine.snapshot(), board, { feeRate: engine.feeRate, historical: historicalEngine(), ...sizingOpts(body) }) };
+  'POST /api/replacements': (body, mode) => {
+    const bk = book(mode);
+    const board = addCombos((body.board ?? []).map((c, i) => resolveCandidate(c, i, bk.engine)));
+    return { replacements: findReplacements(bk.engine.snapshot(), board, { feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), ...sizingOpts(body) }) };
   },
 
-  'GET /api/history': () => {
-    const items = simHistory;
+  'GET /api/history': (body, mode) => {
+    const items = book(mode).history;
     const n = items.length;
     const wins = items.filter((d) => d.won).length;
     const totalRealizedCents = items.reduce((a, d) => a + (d.realizedPureProfitCents || 0), 0);
@@ -527,14 +559,16 @@ const api = {
         roiPct: totalStakeCents > 0 ? Math.round((totalRealizedCents / totalStakeCents) * 1000) / 10 : 0,
         bestCents: n ? Math.max(...profits) : 0,
         worstCents: n ? Math.min(...profits) : 0,
-        kinds: historicalEngine().kindSummary(),
+        kinds: historicalEngine(items).kindSummary(),
       },
+      mode,
     };
   },
 
-  'GET /api/missed': () => ({ missed: missedSummary() }),
+  'GET /api/missed': (body, mode) => ({ missed: missedSummary(book(mode).missed) }),
 
-  'POST /api/missed/log': (body) => {
+  'POST /api/missed/log': (body, mode) => {
+    const missed = book(mode).missed;
     const pendingTeams = new Set(missed.filter((m) => m.status === 'pending').map((m) => m.team));
     for (const p of body.picks ?? []) {
       if (!p || !p.team || pendingTeams.has(p.team)) continue; // dedup pending by team
@@ -551,23 +585,25 @@ const api = {
       });
       pendingTeams.add(p.team);
     }
-    return { missed: missedSummary() };
+    return { missed: missedSummary(missed) };
   },
 
-  'POST /api/missed/resolve': (body) => {
+  'POST /api/missed/resolve': (body, mode) => {
+    const missed = book(mode).missed;
     const m = missed.find((x) => x.id === String(body.id));
     if (!m) throw new Error(`no missed item ${body.id}`);
     m.status = body.outcome === 'win' ? 'won' : 'lost';
     m.resolvedAt = new Date().toISOString();
-    return { missed: missedSummary() };
+    return { missed: missedSummary(missed) };
   },
 
-  'POST /api/missed/clear': () => {
-    missed.length = 0;
-    return { missed: missedSummary() };
+  'POST /api/missed/clear': (body, mode) => {
+    book(mode).missed.length = 0;
+    return { missed: missedSummary(book(mode).missed) };
   },
 
-  'POST /api/rank': (body) => {
+  'POST /api/rank': (body, mode) => {
+    const bk = book(mode);
     const stakeCents = toCents(Number(body.stakeDollars ?? 10));
     const board = (body.board ?? []).map((c, i) => ({
       id: c.id || `cand-${i + 1}`,
@@ -579,7 +615,7 @@ const api = {
       gameState: c.gameState || null,
       status: c.status || 'open',
     }));
-    const result = engine.rankBoard(board, { stakeCents, historical: historicalEngine() });
+    const result = bk.engine.rankBoard(board, { stakeCents, historical: historicalEngine(bk.history) });
     return { ranking: result, stakeCents };
   },
 };
@@ -619,7 +655,10 @@ const server = createServer(async (req, res) => {
     if (!handler) return sendJson(res, 404, { error: `no route ${key}` });
 
     const body = req.method === 'POST' ? await readBody(req) : {};
-    const result = await handler(body);
+    // Which book this request touches: from the body (POST) or ?mode= (GET). Default sim.
+    const rawMode = (body && body.mode) || url.searchParams.get('mode') || 'sim';
+    const mode = rawMode === 'live' ? 'live' : 'sim';
+    const result = await handler(body, mode);
     if (MUTATING.has(url.pathname)) persist();
     return sendJson(res, 200, { ok: true, ...result });
   } catch (err) {

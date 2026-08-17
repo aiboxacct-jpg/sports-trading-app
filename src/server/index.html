@@ -349,7 +349,8 @@ function setMode(m) {
   localStorage.setItem('appMode', appMode);
   stopPlay();
   applyMode();
-  // Load the right board for the new mode so the switch is immediate.
+  // Load THIS book's positions/bankroll/history + board so the switch is immediate.
+  refresh().catch(() => {});
   livegame().catch(() => {});
 }
 
@@ -364,10 +365,14 @@ function onStakeChange() {
 }
 
 async function call(path, body) {
-  const res = await fetch(path, {
-    method: body ? 'POST' : 'GET',
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
+  // Tag every request with the current mode so the server hits the right book
+  // (SIMULATION vs LIVE) — they never share a bankroll, positions, or history.
+  const isPost = body !== undefined && body !== null;
+  const url = isPost ? path : path + (path.includes('?') ? '&' : '?') + 'mode=' + appMode;
+  const res = await fetch(url, {
+    method: isPost ? 'POST' : 'GET',
+    headers: isPost ? { 'Content-Type': 'application/json' } : {},
+    body: isPost ? JSON.stringify({ ...body, mode: appMode }) : undefined,
   });
   const data = await res.json();
   if (!res.ok || data.ok === false) throw new Error(data.error || 'request failed');
@@ -898,7 +903,7 @@ async function pregame() {
   try {
     $('rankErr').textContent = ''; $('rankOut').innerHTML = '';
     const board = await boardForRanking();
-    renderPreGame((await call('/api/pregame', { board, mode: isLive() ? 'LIVE' : 'SIMULATION', ...sizing() })).pregame);
+    renderPreGame((await call('/api/pregame', { board, ...sizing() })).pregame);
   } catch (e) { $('rankErr').textContent = e.message; }
 }
 
