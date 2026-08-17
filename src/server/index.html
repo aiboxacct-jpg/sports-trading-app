@@ -240,10 +240,17 @@
           <b style="font-size:12px">Simulate game:</b>
           <select id="sportSel" style="width:auto"><option value="MLB">MLB (9 innings)</option><option value="NHL">NHL (3 periods)</option></select>
           <select id="speedSel" style="width:auto" title="play speed" onchange="setSpeed()">
-            <option value="2000">Fast · 2s</option>
-            <option value="3500" selected>Normal · 3.5s</option>
-            <option value="6000">Slow · 6s</option>
-            <option value="10000">Very slow · 10s</option>
+            <optgroup label="Quick (delay per inning)">
+              <option value="2000">Fast · 2s</option>
+              <option value="3500" selected>Normal · 3.5s</option>
+              <option value="6000">Slow · 6s</option>
+              <option value="10000">Very slow · 10s</option>
+            </optgroup>
+            <optgroup label="Real-time (whole game)">
+              <option value="game:300000">🕐 5-minute game</option>
+              <option value="game:600000">🕐 10-minute game</option>
+              <option value="game:1200000">🕐 20-minute game</option>
+            </optgroup>
           </select>
           <button class="sm play-btn" id="playBtn" onclick="playPause()">▶ Play</button>
           <button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button>
@@ -592,11 +599,22 @@ async function gameTick() {
 }
 async function advanceOnce() { try { await gameTick(); } catch (e) { $('liveErr').textContent = e.message; } }
 function stopPlay() { if (playTimer) { clearInterval(playTimer); playTimer = null; } document.querySelectorAll('.play-btn').forEach((b) => { b.textContent = '▶ Play'; }); }
+// Per-step interval (ms). "game:<totalMs>" spreads a whole game across its innings so it
+// plays out in real time (e.g. a 10-min game = 600000/18 ≈ 33s per half-inning); a plain
+// number is a fixed delay per inning.
+function speedMs() {
+  const v = $('speedSel') ? $('speedSel').value : '3500';
+  if (typeof v === 'string' && v.startsWith('game:')) {
+    const totalMs = parseInt(v.slice(5), 10);
+    const steps = GAME_FORMATS[currentSport()].totalSteps || 18;
+    return Math.max(500, Math.round(totalMs / steps));
+  }
+  return +v || 3500;
+}
 function playPause() {
   if (playTimer) { stopPlay(); return; }
   document.querySelectorAll('.play-btn').forEach((b) => { b.textContent = '⏸ Pause'; });
-  const ms = $('speedSel') ? +$('speedSel').value : 3500;
-  playTimer = setInterval(() => gameTick().catch(() => stopPlay()), ms); // runs until you pause
+  playTimer = setInterval(() => gameTick().catch(() => stopPlay()), speedMs()); // runs until you pause
 }
 // Change speed live: if playing, restart the interval at the new pace.
 function setSpeed() { if (playTimer) { stopPlay(); playPause(); } }
