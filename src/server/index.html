@@ -859,6 +859,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'u' || e.key === 'U' || e.key === 'r' || e.key === 'R') { e.preventDefault(); refresh(); }
 });
 
+// Browsers throttle timers in background tabs, so a live game can look "stuck" while you
+// watch elsewhere. Refresh the instant you return to the app (tab focus / becomes visible).
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh().catch(() => {}); });
+window.addEventListener('focus', () => refresh().catch(() => {}));
+
 // ---- actions ----
 async function reset() {
   try { stopPlay(); gameStep = 0; setGameClock(''); await call('/api/reset', { startingDollars: +$('startDollars').value, targetDollars: +$('targetDollars').value }); await refresh(); }
