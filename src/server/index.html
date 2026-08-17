@@ -207,8 +207,8 @@
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="refreshLiveGames()">🔄 Refresh prices</button></div>
-        <div class="live-only" style="flex:0 0 auto;display:none"><label>&nbsp;</label><button class="sm" id="autoLiveBtn" onclick="toggleAutoLive()">▶ Auto-refresh live</button></div>
-        <div class="live-only" style="flex:0 0 auto;display:none"><label>&nbsp;</label><span id="autoLiveStatus" style="font-size:12px"></span></div>
+        <div class="live-only" style="flex:0 0 auto;display:none"><label>&nbsp;</label><button class="sm auto-live-btn" onclick="toggleAutoLive()">▶ Auto-refresh live</button></div>
+        <div class="live-only" style="flex:0 0 auto;display:none"><label>&nbsp;</label><span class="auto-live-status" style="font-size:12px"></span></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="newSlate()">🎲 New slate</button></div>
       </div>
       <div class="err" id="livegameErr"></div>
@@ -221,6 +221,11 @@
     <h2 class="collapser" onclick="toggle(this)"><span class="num">4</span> Live Data Update — in-game
       <span class="tag">move the price / game state, hit Update, watch the target</span><span class="chev">▾</span></h2>
     <div class="body">
+      <div class="live-only" data-live-display="flex" style="display:none;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#fbfdff">
+        <button class="sm auto-live-btn" onclick="toggleAutoLive()">▶ Auto-refresh live</button>
+        <span class="auto-live-status" style="font-size:12px"></span>
+        <span class="muted" style="font-size:12px;margin-left:auto">auto-updates your positions' price, inning &amp; score every 12s · or press <b>u</b></span>
+      </div>
       <div id="goalPath"></div>
       <div id="targetMonitor"></div>
       <table>
@@ -307,7 +312,7 @@ async function applyMode() {
   // Hide simulation-only clock controls in live mode (real games don't take a fake clock),
   // and reveal live-only controls (auto-refresh) instead.
   document.querySelectorAll('.sim-only').forEach((b) => { b.style.display = isLive() ? 'none' : ''; });
-  document.querySelectorAll('.live-only').forEach((b) => { b.style.display = isLive() ? '' : 'none'; });
+  document.querySelectorAll('.live-only').forEach((b) => { b.style.display = isLive() ? (b.dataset.liveDisplay || '') : 'none'; });
   if (!isLive()) stopAutoLive();
   if (isLive()) stopPlay(); // never leave a sim clock running in live mode
   if (!banner) return;
@@ -577,22 +582,29 @@ function setSpeed() { if (playTimer) { stopPlay(); playPause(); } }
 // LIVE mode auto-refresh: gently re-pull real Kalshi prices on a timer (no simulation,
 // never settles positions). Distinct from the simulation "Play" clock.
 let autoLiveTimer = null;
+// Reflect the on/off state across every auto-refresh control (Live Board + Live Data).
+function setAutoLiveUI(on) {
+  document.querySelectorAll('.auto-live-btn').forEach((b) => {
+    b.textContent = on ? '⏸ Auto-refresh ON' : '▶ Auto-refresh live';
+    b.classList.toggle('on', on);
+  });
+  if (!on) document.querySelectorAll('.auto-live-status').forEach((s) => { s.innerHTML = ''; });
+}
 function stopAutoLive() {
   if (autoLiveTimer) { clearInterval(autoLiveTimer); autoLiveTimer = null; }
-  const b = $('autoLiveBtn'); if (b) { b.textContent = '▶ Auto-refresh live'; b.classList.remove('on'); }
-  const s = $('autoLiveStatus'); if (s) s.innerHTML = '';
+  setAutoLiveUI(false);
 }
 async function autoLiveTick() {
   await refresh().catch(() => {});
-  const s = $('autoLiveStatus');
-  if (s) {
-    s.innerHTML = `<span class="dot">🟢</span> live · updated ${new Date().toLocaleTimeString()}`;
+  const html = `<span class="dot">🟢</span> live · updated ${new Date().toLocaleTimeString()}`;
+  document.querySelectorAll('.auto-live-status').forEach((s) => {
+    s.innerHTML = html;
     s.classList.remove('flash-good'); void s.offsetWidth; s.classList.add('flash-good'); // re-trigger flash
-  }
+  });
 }
 function toggleAutoLive() {
   if (autoLiveTimer) { stopAutoLive(); return; }
-  const b = $('autoLiveBtn'); if (b) { b.textContent = '⏸ Auto-refresh ON'; b.classList.add('on'); }
+  setAutoLiveUI(true);
   autoLiveTick();
   autoLiveTimer = setInterval(autoLiveTick, 12000);
 }
