@@ -59,6 +59,7 @@ export function normalizeScheduleGames(json) {
       ordinal: ls.currentInningOrdinal ?? (ls.currentInning ? String(ls.currentInning) : null),
       awayScore: g.teams?.away?.score ?? null,
       homeScore: g.teams?.home?.score ?? null,
+      gameNumber: g.gameNumber ?? null, // 1 or 2 for a doubleheader
       gameDate: g.gameDate || null,
     };
   }).filter((x) => x.away && x.home);
@@ -74,11 +75,17 @@ export function winnerNick(g) {
   return g.awayScore > g.homeScore ? g.away : g.home;
 }
 
-/** Find the normalized game matching two nicknames (either home/away order). */
-export function findGameFor(games, nick1, nick2) {
-  return games.find(
+/**
+ * Find the normalized game matching two nicknames (either home/away order). For a
+ * doubleheader, pass the ticker's game number so the right game (1 vs 2) is returned;
+ * without it, the first match wins (fine for single games).
+ */
+export function findGameFor(games, nick1, nick2, gameNumber = null) {
+  const matches = games.filter(
     (g) => (g.away === nick1 && g.home === nick2) || (g.away === nick2 && g.home === nick1),
-  ) || null;
+  );
+  if (gameNumber != null) return matches.find((g) => g.gameNumber === gameNumber) || null;
+  return matches[0] || null;
 }
 
 /** ISO date (YYYY-MM-DD) in US Eastern for a given epoch ms — the MLB "game day". */

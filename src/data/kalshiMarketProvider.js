@@ -39,6 +39,16 @@ export function mlbTickerDate(ticker) {
 }
 
 /**
+ * Doubleheader game number from an MLB ticker, e.g. "…STLCING2-STL" -> 2, "…STLCING1" -> 1.
+ * Returns null for a single game (no G# suffix). The regex is end-anchored so the "G1" in a
+ * date like "AUG19" can't false-match. Used to tell the two games of a doubleheader apart.
+ */
+export function mlbTickerGameNumber(ticker) {
+  const m = /G(\d)(?:-[A-Z0-9]+)?$/.exec(ticker || '');
+  return m ? Number(m[1]) : null;
+}
+
+/**
  * Kalshi's v2 API returns money as dollar STRINGS ("0.4700"), not integer cents.
  * Convert to integer cents; return null for missing/blank so we never invent a price.
  */

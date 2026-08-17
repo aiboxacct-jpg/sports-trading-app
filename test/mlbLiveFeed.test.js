@@ -53,6 +53,16 @@ test('normalizeScheduleGames flattens + matches a live game', () => {
   assert.equal(findGameFor([g], 'Orioles', 'Yankees'), null);
 });
 
+test('findGameFor picks the right game of a doubleheader by game number', () => {
+  const g1 = { away: 'Cardinals', home: 'Reds', state: 'Live', gameNumber: 1, awayScore: 2, homeScore: 0 };
+  const g2 = { away: 'Cardinals', home: 'Reds', state: 'Preview', gameNumber: 2, awayScore: null, homeScore: null };
+  const games = [g1, g2];
+  assert.equal(findGameFor(games, 'Cardinals', 'Reds', 1), g1); // live game 1
+  assert.equal(findGameFor(games, 'Cardinals', 'Reds', 2), g2); // scheduled game 2 (not g1!)
+  assert.equal(findGameFor(games, 'Cardinals', 'Reds'), g1);    // no number -> first match
+  assert.equal(findGameFor(games, 'Cardinals', 'Reds', 3), null); // no such game
+});
+
 test('winnerNick picks the winner only for a decisive final game', () => {
   assert.equal(winnerNick({ state: 'Final', away: 'Rays', home: 'Orioles', awayScore: 3, homeScore: 2 }), 'Rays');
   assert.equal(winnerNick({ state: 'Final', away: 'Rays', home: 'Orioles', awayScore: 1, homeScore: 5 }), 'Orioles');

@@ -22,7 +22,7 @@ import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js
 import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
-import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, mlbTickerDate } from '../data/kalshiMarketProvider.js';
+import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
 import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr, winnerNick } from '../data/mlbLiveFeed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +67,7 @@ function mlbGamesToCandidates(games, now = Date.now()) {
         priceCents: s.priceCents,
         gameState: live ? '🔴 LIVE' : null, // real inning/score arrives with the MLB feed
         live,
+        gameNumber: mlbTickerGameNumber(s.ticker), // 1/2 for doubleheaders, else null
         startTime: s.occurrenceTime ?? null,
         status: tradeable ? 'open' : (s.status ?? 'open'),
         verified: true,
@@ -99,7 +100,7 @@ async function annotateLive(board, nowMs) {
   try { games = await fetchLiveGames(etDateStr(nowMs)); }
   catch { return; }
   for (const c of board) {
-    const g = findGameFor(games, nickFromKalshi(c.team), nickFromKalshi(c.opponent));
+    const g = findGameFor(games, nickFromKalshi(c.team), nickFromKalshi(c.opponent), c.gameNumber);
     if (g) annotateFromSchedule(c, g);
   }
 }
@@ -121,7 +122,7 @@ async function liveMlbBoard({ force = false } = {}) {
   try { schedule = await fetchLiveGames(today); } catch { schedule = null; }
   if (schedule && schedule.length) {
     board = board.filter((c) => {
-      const g = findGameFor(schedule, nickFromKalshi(c.team), nickFromKalshi(c.opponent));
+      const g = findGameFor(schedule, nickFromKalshi(c.team), nickFromKalshi(c.opponent), c.gameNumber);
       if (g && g.state === 'Final') return false; // finished — not actionable
       if (g) annotateFromSchedule(c, g);
       return true;
@@ -496,7 +497,8 @@ const api = {
     const autoSettled = [];
     for (const p of engine.positions) {
       if (p.status !== 'open') continue;
-      const g = findGameFor(games, nickFromKalshi(p.team), nickFromKalshi(p.opponent));
+      // Match the SPECIFIC game (game 1 vs 2 of a doubleheader) via the ticker's game number.
+      const g = findGameFor(games, nickFromKalshi(p.team), nickFromKalshi(p.opponent), mlbTickerGameNumber(p.ticker));
       // Auto-settle the LIVE paper ledger from the real result once the game is Final.
       // Never touches real money on Kalshi — only records the outcome you'd have had.
       const winner = winnerNick(g);
@@ -509,10 +511,12 @@ const api = {
       const px = priceByTicker.get(p.ticker);
       if (px != null) { engine.setPrice(p.ticker, px); priced++; }
       if (g) {
+        // Live -> inning + score; Final(tie/rare) -> final; not started yet -> clear any
+        // stale state (e.g. a doubleheader's other game) so it doesn't show a wrong score.
         const gs = g.state === 'Live' ? `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
           : g.state === 'Final' ? `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
-          : null;
-        if (gs) { engine.setGameState(p.id, gs); stated++; }
+          : '';
+        engine.setGameState(p.id, gs); stated++;
       }
     }
     const snapshot = engine.snapshot();

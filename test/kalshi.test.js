@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
-import { signKalshi, KalshiMarketProvider, dollarsToCents, normalizeMarket, mlbTickerDate } from '../src/data/kalshiMarketProvider.js';
+import { signKalshi, KalshiMarketProvider, dollarsToCents, normalizeMarket, mlbTickerDate, mlbTickerGameNumber } from '../src/data/kalshiMarketProvider.js';
 
 const pssVerify = (publicKey, msg, sigB64) =>
   crypto.verify('sha256', Buffer.from(msg), {
@@ -46,6 +46,14 @@ test('mlbTickerDate reads the reliable game date from the ticker', () => {
   assert.equal(mlbTickerDate('KXMLBGAME-25DEC0159XYZ-YES'), '2025-12-01');
   assert.equal(mlbTickerDate('NOT-A-GAME'), null);
   assert.equal(mlbTickerDate(null), null);
+});
+
+test('mlbTickerGameNumber tells doubleheader games apart (and ignores dates)', () => {
+  assert.equal(mlbTickerGameNumber('KXMLBGAME-26AUG171340STLCING1-STL'), 1);
+  assert.equal(mlbTickerGameNumber('KXMLBGAME-26AUG171840STLCING2-CIN'), 2);
+  assert.equal(mlbTickerGameNumber('KXMLBGAME-26AUG171340STLCING1'), 1); // event ticker, no side
+  assert.equal(mlbTickerGameNumber('KXMLBGAME-26AUG191840STLCIN-STL'), null); // single game
+  assert.equal(mlbTickerGameNumber('KXMLBGAME-26AUG161920SEAHOU-SEA'), null); // "AUG16"/"G19" not end-matched
 });
 
 test('dollarsToCents parses the API dollar strings, never invents on blanks', () => {
