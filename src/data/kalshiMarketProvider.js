@@ -59,8 +59,10 @@ export function normalizeMarket(m) {
     askCents: ask,
     lastCents: last,
     midCents: mid,
-    // Best single "price" to show: last trade, else the two-sided mid, else the bid.
-    priceCents: last ?? mid ?? bid ?? null,
+    // Best single "price" to show. Prefer the two-sided MID — that's what Kalshi's
+    // headline % reflects and it tracks a live market far better than the last trade,
+    // which lags. Fall back to last trade, then a one-sided quote.
+    priceCents: mid ?? last ?? bid ?? ask ?? null,
     volume,
     // Genuine tradeable market: either it has traded, or it shows a real two-sided quote.
     hasLiquidity: volume > 0 || (bid != null && ask != null),
