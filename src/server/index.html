@@ -130,6 +130,7 @@
       <div><small>Committed</small><b id="committed">—</b></div>
       <div><small>Unrealized P/P</small><b id="unreal">—</b></div>
       <div><small>Realized P/P</small><b id="real">—</b></div>
+      <div title="profit banked across completed target rounds"><small>🏦 Banked <span id="bankedRounds" class="muted"></span></small><b id="banked" class="pos">—</b></div>
     </div>
     <div class="stakebox">
       <small>Stake / pick</small>
@@ -141,6 +142,8 @@
     <small>Target <span id="targetAmt"></span></small>
     <div class="state" id="targetState">—</div>
     <div class="alert" id="targetAlert"></div>
+    <button id="newRoundBtn" onclick="newRound(false)" style="display:none;margin-top:6px;background:var(--good);color:#fff;border-color:var(--good)">🎉 Bank it &amp; start new round</button>
+    <label id="autoRoundLbl" style="display:none;font-size:11px;align-items:center;gap:4px;margin-top:4px"><input type="checkbox" id="autoRoundCb" style="width:auto" onchange="toggleAutoRound()"> auto-start next round</label>
   </div>
   <div class="setup">
     start $<input id="startDollars" type="number" value="100" />
@@ -389,7 +392,9 @@ async function call(path, body) {
 }
 
 // ---- pinned strip + live positions ----
+let lastSnapshot = null;
 function renderSnapshot(snap) {
+  lastSnapshot = snap;
   const b = snap.bankroll, t = snap.target;
   $('cash').textContent = fmt(b.currentCashCents);
   $('committed').textContent = fmt(b.committedCents);
@@ -809,6 +814,44 @@ function renderGoalPath(g) {
 let autoLock = localStorage.getItem('autoLock') !== 'false'; // default ON
 function toggleAutoLock() { autoLock = $('autoLockCb').checked; localStorage.setItem('autoLock', autoLock); if (autoLock) refresh(); }
 
+// ---- goal-seeking loop: bank a hit target, start a fresh round ----
+// Default ON, but only ever fires when the round is truly done (target realized AND no
+// open positions), so it never silently abandons a live bet.
+let autoRound = localStorage.getItem('autoRound') !== 'false';
+let roundResetting = false;
+function toggleAutoRound() { autoRound = $('autoRoundCb').checked; localStorage.setItem('autoRound', autoRound); if (autoRound) refresh(); }
+function renderBanked(banked) {
+  const b = banked || { cents: 0, rounds: 0 };
+  const el = $('banked'); if (el) { el.textContent = b.cents ? fmt(b.cents) : '$0.00'; el.className = b.cents > 0 ? 'pos' : (b.cents < 0 ? 'neg' : ''); }
+  const r = $('bankedRounds'); if (r) r.textContent = b.rounds ? '(' + b.rounds + '✓)' : '';
+}
+// Show/hide the new-round controls when the target is realized; auto-start if opted in
+// and nothing is still open (so we never abandon a live position silently).
+function handleTargetRound(state) {
+  renderBanked(state.banked);
+  const realized = state.snapshot.target.state === 'TARGET REALIZED';
+  const openCount = state.snapshot.positions.filter((p) => p.status === 'open').length;
+  const btn = $('newRoundBtn'), lbl = $('autoRoundLbl'), cb = $('autoRoundCb');
+  if (btn) btn.style.display = realized ? '' : 'none';
+  if (lbl) lbl.style.display = realized ? 'inline-flex' : 'none';
+  if (cb) cb.checked = autoRound;
+  if (realized && autoRound && openCount === 0 && !roundResetting) {
+    roundResetting = true;
+    newRound(true).finally(() => { roundResetting = false; });
+  }
+}
+async function newRound(auto) {
+  try {
+    if (!auto) {
+      const openCount = (lastSnapshot?.positions || []).filter((p) => p.status === 'open').length;
+      if (openCount && !confirm(`You still have ${openCount} open position(s). Starting a new round resets the bankroll to start and drops them from tracking. Continue?`)) return;
+    }
+    const r = await call('/api/newround', { startingDollars: +$('startDollars').value, targetDollars: +$('targetDollars').value });
+    flashDecision(`🎉 Target hit! Banked ${fmt(r.bankedThisRoundCents)} — ${fmt(r.banked.cents)} total over ${r.banked.rounds} round(s). Fresh round started.`);
+    await refresh();
+  } catch (e) { $('liveErr').textContent = e.message; }
+}
+
 async function refresh() {
   try {
     // In live mode, first pull real Kalshi prices + real MLB inning/score onto any open
@@ -837,6 +880,7 @@ async function refresh() {
     // Replacement scan runs against the same board we're showing (real games in live mode).
     lastReplacements = (await call('/api/replacements', { board: isLive() ? lastLiveCandidates : gatherBoard(), ...sizing() })).replacements;
     renderSnapshot(state.snapshot);
+    handleTargetRound(state); // bank + new-round loop when the target is realized
     renderGoalPath(state.goalPath);
     renderReplacements(lastReplacements);
     renderLiveGame(lastLivegame);

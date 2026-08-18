@@ -198,8 +198,11 @@ function loadBook(s) {
     engine: s && s.engine ? SimEngine.fromState(s.engine) : newEngine({ startingDollars: 100, targetDollars: 5 }),
     history: Array.isArray(s && s.history) ? s.history : [],
     missed: Array.isArray(s && s.missed) ? s.missed : [],
+    bankedCents: Number(s && s.bankedCents) || 0, // profit banked across completed target rounds
+    roundsWon: Number(s && s.roundsWon) || 0,     // how many target rounds have been hit
   };
 }
+const bankedInfo = (bk) => ({ cents: bk.bankedCents || 0, rounds: bk.roundsWon || 0 });
 const saved = loadState(STATE_FILE);
 if (saved && saved.version === 2) {
   books.sim = loadBook(saved.sim);
@@ -240,8 +243,8 @@ function driftLiveBoard() {
 function persist() {
   saveState(STATE_FILE, {
     version: 2,
-    sim: { engine: books.sim.engine.toState(), history: books.sim.history, missed: books.sim.missed },
-    live: { engine: books.live.engine.toState(), history: books.live.history, missed: books.live.missed },
+    sim: { engine: books.sim.engine.toState(), history: books.sim.history, missed: books.sim.missed, bankedCents: books.sim.bankedCents, roundsWon: books.sim.roundsWon },
+    live: { engine: books.live.engine.toState(), history: books.live.history, missed: books.live.missed, bankedCents: books.live.bankedCents, roundsWon: books.live.roundsWon },
     liveBoard,
   });
 }
@@ -349,7 +352,7 @@ function sizingOpts(body) {
 const api = {
   'GET /api/state': (body, mode) => {
     const snapshot = book(mode).engine.snapshot();
-    return { snapshot, goalPath: computeGoalPath(snapshot), mode };
+    return { snapshot, goalPath: computeGoalPath(snapshot), mode, banked: bankedInfo(book(mode)) };
   },
 
   'POST /api/reset': (body, mode) => {
@@ -358,6 +361,22 @@ const api = {
       targetDollars: body.targetDollars ?? 5,
     });
     return { snapshot: book(mode).engine.snapshot() };
+  },
+
+  // Bank a completed target round and start fresh: add the round's realized profit to the
+  // lifetime "banked" tally, bump the rounds-won count, then reset the bankroll (KEEPING
+  // history + missed so the learning engine carries over). This is the goal-seeking loop.
+  'POST /api/newround': (body, mode) => {
+    const bk = book(mode);
+    const realized = bk.engine.snapshot().bankroll.realizedPureProfitCents;
+    bk.bankedCents = (bk.bankedCents || 0) + realized;
+    bk.roundsWon = (bk.roundsWon || 0) + 1;
+    bk.engine = newEngine({
+      startingDollars: body.startingDollars ?? 100,
+      targetDollars: body.targetDollars ?? 5,
+    });
+    const snapshot = bk.engine.snapshot();
+    return { snapshot, goalPath: computeGoalPath(snapshot), banked: bankedInfo(bk), bankedThisRoundCents: realized };
   },
 
   // Full clean slate for THIS mode only: new bankroll + wipe its history & missed ledger.
@@ -369,8 +388,10 @@ const api = {
     });
     bk.history.length = 0;
     bk.missed.length = 0;
+    bk.bankedCents = 0;
+    bk.roundsWon = 0;
     if (mode !== 'live') liveBoard = generateLiveBoard();
-    return { snapshot: bk.engine.snapshot() };
+    return { snapshot: bk.engine.snapshot(), banked: bankedInfo(bk) };
   },
 
   'POST /api/price': (body, mode) => {
@@ -520,7 +541,7 @@ const api = {
       }
     }
     const snapshot = engine.snapshot();
-    return { snapshot, goalPath: computeGoalPath(snapshot), synced: { priced, stated }, autoSettled };
+    return { snapshot, goalPath: computeGoalPath(snapshot), synced: { priced, stated }, autoSettled, banked: bankedInfo(bk) };
   },
 
   // Force a fresh pull (bypass the cache), e.g. on "u"/"update"/"refresh".
@@ -626,7 +647,7 @@ const api = {
 
 // Routes that change state and must be persisted after handling.
 const MUTATING = new Set([
-  '/api/reset', '/api/clear', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
+  '/api/reset', '/api/clear', '/api/newround', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
   '/api/missed/log', '/api/missed/resolve', '/api/missed/clear',
   '/api/livegame/refresh', '/api/livegame/tick', '/api/livegame/new', '/api/live/sync',
 ]);
