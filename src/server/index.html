@@ -97,6 +97,8 @@
   @keyframes blinkred { 0%, 100% { background: transparent; } 50% { background: #ffdede; } }
   tr.approaching { animation: blinkred 1s ease-in-out infinite; }
   tr.approaching td:first-child { border-left: 3px solid var(--bad); }
+  tr.inprofit td { background: #eafaef; }                 /* in the green — positive unrealized P/P */
+  tr.inprofit td:first-child { border-left: 3px solid var(--good); }
   .nearflag { color: var(--bad); font-weight: 700; font-size: 11px; }
   .summary { font-size: 14px; margin-bottom: 8px; }
   @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
@@ -413,6 +415,7 @@ function renderSnapshot(snap) {
     // pulse red when this position's unrealized profit is closing in on the target
     const up = p.unrealizedPureProfitCents;
     const near = up != null && t.targetCents > 0 && up >= 0.7 * t.targetCents && up < t.targetCents;
+    const inProfit = up != null && up > 0; // in the green — show it stand out
     const pickLabel = pickText(p);
     const kindLabel = p.kind === 'combo' ? 'combo (parlay)' : 'single';
     // Game state: in live mode show the real inning + score as readable text (it auto-syncs
@@ -426,7 +429,7 @@ function renderSnapshot(snap) {
           ? `<span style="font-size:12px;${gsIsInning ? 'color:var(--bad);font-weight:600' : gsIsFinal ? 'color:var(--muted);font-weight:600' : 'color:var(--muted)'}">${gsIsInning ? '🔴 ' : gsIsFinal ? '🏁 ' : ''}${gsSafe}</span>`
           : '<span class="muted" style="font-size:12px">waiting for first pitch…</span>')
       : `<input id="gs-${p.id}" value="${gsRaw.replace(/"/g, '&quot;')}" placeholder="Top 5, 2 out" style="width:120px"><button class="sm ghost" onclick="setState('${p.id}')">Set</button>`;
-    return `<tr class="${near ? 'approaching' : ''}">
+    return `<tr class="${near ? 'approaching' : (inProfit ? 'inprofit' : '')}">
       <td>${pickLabel}
         <span class="status-open">[open]</span>${near ? ' <span class="nearflag">🔴 near target</span>' : ''}<br>
         <span class="muted" style="font-size:11px">${kindLabel} · ${p.contracts} contract${p.contracts === 1 ? '' : 's'} @ ${p.entryPriceCents}¢ · <span title="Kalshi market ID: series · date · start time · matchup · the side you hold">${p.ticker}</span></span></td>
