@@ -99,6 +99,10 @@
   tr.approaching td:first-child { border-left: 3px solid var(--bad); }
   tr.inprofit td { background: #eafaef; }                 /* in the green — positive unrealized P/P */
   tr.inprofit td:first-child { border-left: 3px solid var(--good); }
+  @keyframes npUp { 0% { background: #b9f0cb; border-color: var(--good); } 100% { background: #fff; } }
+  @keyframes npDown { 0% { background: #ffcfcf; border-color: var(--bad); } 100% { background: #fff; } }
+  input.np-up { animation: npUp 1.1s ease-out; }          /* price ticked up since last refresh */
+  input.np-down { animation: npDown 1.1s ease-out; }      /* price ticked down */
   .nearflag { color: var(--bad); font-weight: 700; font-size: 11px; }
   .summary { font-size: 14px; margin-bottom: 8px; }
   @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
@@ -395,6 +399,7 @@ async function call(path, body) {
 
 // ---- pinned strip + live positions ----
 let lastSnapshot = null;
+let prevPrices = {}; // position id -> last NOW price, to flash the box on movement
 function renderSnapshot(snap) {
   lastSnapshot = snap;
   const b = snap.bankroll, t = snap.target;
@@ -411,6 +416,9 @@ function renderSnapshot(snap) {
   const open = snap.positions.filter((p) => p.status === 'open');
   $('posBody').innerHTML = open.length ? open.map((p) => {
     const now = p.currentPriceCents ?? p.entryPriceCents;
+    // flash the NOW box green on an uptick, red on a downtick (vs the last refresh)
+    const prevNow = prevPrices[p.id];
+    const moveCls = prevNow == null ? '' : (now > prevNow ? 'np-up' : now < prevNow ? 'np-down' : '');
     const payoutX = Math.round((100 / now) * 10) / 10; // live payout multiple at the current price
     // pulse red when this position's unrealized profit is closing in on the target
     const up = p.unrealizedPureProfitCents;
@@ -435,7 +443,7 @@ function renderSnapshot(snap) {
         <span class="muted" style="font-size:11px">${kindLabel} · ${p.contracts} contract${p.contracts === 1 ? '' : 's'} @ ${p.entryPriceCents}¢ · <span title="Kalshi market ID: series · date · start time · matchup · the side you hold">${p.ticker}</span></span></td>
       <td>${p.entryPriceCents}¢</td>
       <td>${gsCell}</td>
-      <td><input type="number" id="np-${p.id}" value="${now}" min="1" max="99" style="width:60px">
+      <td><input type="number" id="np-${p.id}" class="${moveCls}" value="${now}" min="1" max="99" style="width:60px">
         <button class="sm ghost" onclick="setPrice('${p.ticker}','np-${p.id}')">Set¢</button></td>
       <td><b>${payoutX}×</b></td>
       <td>${fmt(p.currentValueCents)}</td>
@@ -445,6 +453,9 @@ function renderSnapshot(snap) {
         <button class="sm ghost" onclick="settle('${p.id}','win')">Win</button>
         <button class="sm ghost" onclick="settle('${p.id}','loss')">Loss</button></td></tr>`;
   }).join('') : '<tr><td colspan="8" class="muted">No open positions. Enter one in Pre-Game.</td></tr>';
+  // remember this render's prices so the next refresh can flash on movement
+  prevPrices = {};
+  for (const p of open) prevPrices[p.id] = p.currentPriceCents ?? p.entryPriceCents;
   renderTargetMonitor(snap);
   renderDecisions(snap);
 }
