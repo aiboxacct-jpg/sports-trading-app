@@ -10,9 +10,14 @@ auto-settle / edge), generalized ticker parser + `listMlbGames(seriesTicker)`, a
 confirm once games are actually being played: live in-progress quarter/clock/score sync
 and NFL auto-settle (preseason games Aug 28 evenings; regular season Sept).
 
-## 🏒 NHL live support (build closer to the season)
-Now a quick add — the sport registry from NFL is in place, so this is mostly a
-`nhlLiveFeed.js` + one registry entry.
+## ✅ NHL live support — built (2026-08-28), verify when markets appear
+`nhlLiveFeed.js` (ESPN NHL scoreboard — P1–3 / OT / Shootout / Final) + registry entry +
+🏒 in the toggle. Board is correctly EMPTY now (offseason — Kalshi lists no `KXNHLGAME`).
+**To confirm when the season nears (~late Sept):** the Kalshi NHL team-label map (esp.
+the two New York teams and any city Kalshi abbreviates oddly) and live in-progress sync.
+
+All three leagues now share one live pipeline — adding a 4th (NBA, etc.) is just another
+`*LiveFeed.js` + one `SPORTS` registry entry + a toggle option.
 **Why parked:** it's the NHL offseason (regular season starts ~October). Kalshi has
 **no per-game NHL markets** yet — `KXNHLGAME` is empty; only season futures
 (`KXNHL-27-*`) are listed. And with no games being played we can't test against live
