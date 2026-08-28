@@ -22,8 +22,42 @@ import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js
 import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
-import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
-import { fetchLiveGames, nickFromKalshi, findGameFor, inningLabel, etDateStr, winnerNick, isInProgress } from '../data/mlbLiveFeed.js';
+import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, KALSHI_MLB_SERIES, KALSHI_NFL_SERIES, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
+import * as mlbFeed from '../data/mlbLiveFeed.js';
+import * as nflFeed from '../data/nflLiveFeed.js';
+import { etDateStr } from '../data/mlbLiveFeed.js'; // ET game-day helper — sport-agnostic
+
+// ---- sport registry: one entry per supported live sport. Each bundles its Kalshi
+// series + a feed adapter, so the live board / sync / auto-settle / edge logic is shared.
+const SPORTS = {
+  mlb: {
+    key: 'mlb', label: 'MLB', emoji: '⚾', series: KALSHI_MLB_SERIES,
+    teamKey: mlbFeed.nickFromKalshi,       // Kalshi label -> match key (nickname)
+    fetchGames: mlbFeed.fetchLiveGames,    // (etDate) -> normalized games
+    findGame: mlbFeed.findGameFor,         // (games, k1, k2, gameNumber)
+    isInProgress: mlbFeed.isInProgress,
+    isFinal: (g) => g.state === 'Final',
+    stateLabel: mlbFeed.inningLabel,       // "Top 4th"
+    winner: mlbFeed.winnerNick,            // -> winning key | null (tie/not final)
+    gameNumber: mlbTickerGameNumber,       // doubleheaders (MLB only)
+  },
+  nfl: {
+    key: 'nfl', label: 'NFL', emoji: '🏈', series: KALSHI_NFL_SERIES,
+    teamKey: nflFeed.abbrFromKalshi,       // Kalshi label -> abbreviation
+    fetchGames: nflFeed.fetchLiveGames,
+    findGame: nflFeed.findGameFor,         // (games, k1, k2) — ignores gameNumber
+    isInProgress: nflFeed.isInProgress,
+    isFinal: (g) => g.state === 'post',
+    stateLabel: nflFeed.quarterLabel,      // "Q3 5:20"
+    winner: nflFeed.winnerAbbr,            // -> winning abbr | null (tie -> push)
+    gameNumber: () => null,                // NFL has no doubleheaders
+  },
+};
+const sportFor = (s) => SPORTS[s] || SPORTS.mlb;
+// Infer a position's sport from its ticker when the field isn't stored (older positions).
+const sportOfTicker = (t) => (/^KXNFLGAME/.test(t || '') ? 'nfl' : 'mlb');
+// A game's score line, e.g. "Orioles 2–1 Rays" (MLB) or "WSH 17–21 DAL" (NFL).
+const scoreLine = (g) => `${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
@@ -39,22 +73,21 @@ function kalshiProvider() {
   return kalshi;
 }
 const LIVE_TTL_MS = 8000;
-let liveCache = { at: 0, board: [] };
+const liveCaches = { mlb: { at: 0, board: [] }, nfl: { at: 0, board: [] } }; // per-sport board cache
 
-// Map Kalshi's grouped MLB games into board candidates (one per priced team side),
-// tagged verified + source so the UI can badge them 🟢 and never confuse them with sim.
+// Map Kalshi's grouped games into board candidates (one per priced team side), tagged
+// verified + source so the UI can badge them 🟢 and never confuse them with sim.
 const LIVE_PLAY_WINDOW_MS = 4 * 3600e3; // a game is "in progress" for ~4h after first pitch
 
-function mlbGamesToCandidates(games, now = Date.now()) {
+function gamesToCandidates(games, now, sport) {
   const board = [];
   for (const g of games) {
     for (const s of g.sides) {
       if (s.priceCents == null) continue; // never invent a price
       const other = g.sides.find((x) => x.ticker !== s.ticker);
       const tradeable = s.status === 'active' || s.status === 'open';
-      // "Live now" heuristic from Kalshi data alone: first pitch has passed, the market
-      // is still open, and we're inside the typical play window. Real inning/score comes
-      // with the MLB feed (Phase 2). null start time => unknown, treat as not-yet-live.
+      // "Live now" heuristic from Kalshi data alone (used only if the feed is down): start
+      // has passed, market still open, inside the typical play window.
       const startMs = s.occurrenceTime ? Date.parse(s.occurrenceTime) : NaN;
       const started = Number.isFinite(startMs) && startMs <= now;
       const live = started && tradeable && (now - startMs <= LIVE_PLAY_WINDOW_MS);
@@ -64,10 +97,11 @@ function mlbGamesToCandidates(games, now = Date.now()) {
         opponent: other?.team ?? null,
         ticker: s.ticker,
         kind: 'single',
+        sport: sport.key,
         priceCents: s.priceCents,
-        gameState: live ? '🔴 LIVE' : null, // real inning/score arrives with the MLB feed
+        gameState: live ? '🔴 LIVE' : null, // real inning/score arrives from the feed
         live,
-        gameNumber: mlbTickerGameNumber(s.ticker), // 1/2 for doubleheaders, else null
+        gameNumber: sport.gameNumber(s.ticker), // 1/2 for MLB doubleheaders, else null
         startTime: s.occurrenceTime ?? null,
         status: tradeable ? 'open' : (s.status ?? 'open'),
         verified: true,
@@ -78,60 +112,60 @@ function mlbGamesToCandidates(games, now = Date.now()) {
   return board;
 }
 
-// Apply one authoritative MLB game's state (inning/score) to a board candidate.
-function annotateFromSchedule(c, g) {
+// Apply one authoritative game's state (inning/quarter + score) to a board candidate.
+function annotateFromSchedule(c, g, sport) {
   c.mlbMatched = true;
-  c.mlbState = g.state;
-  if (isInProgress(g)) {
+  if (sport.isInProgress(g)) {
     c.live = true;
-    c.gameState = `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
-  } else if (g.state === 'Final') {
+    c.gameState = `${sport.stateLabel(g)} · ${scoreLine(g)}`;
+  } else if (sport.isFinal(g)) {
     c.live = false;
-    c.gameState = `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
+    c.gameState = `Final · ${scoreLine(g)}`;
   } else {
-    c.live = false; // Preview / scheduled / warmup — not underway yet, keep the start time
+    c.live = false; // scheduled / warmup / pre — not underway yet, keep the start time
     c.gameState = null;
   }
 }
 
-// Fallback overlay when the MLB feed is unreachable: keep the occurrence heuristic.
-async function annotateLive(board, nowMs) {
+// Fallback overlay when the sport's feed is unreachable: keep the occurrence heuristic.
+async function annotateLive(board, nowMs, sport) {
   let games;
-  try { games = await fetchLiveGames(etDateStr(nowMs)); }
+  try { games = await sport.fetchGames(etDateStr(nowMs)); }
   catch { return; }
   for (const c of board) {
-    const g = findGameFor(games, nickFromKalshi(c.team), nickFromKalshi(c.opponent), c.gameNumber);
-    if (g) annotateFromSchedule(c, g);
+    const g = sport.findGame(games, sport.teamKey(c.team), sport.teamKey(c.opponent), c.gameNumber);
+    if (g) annotateFromSchedule(c, g, sport);
   }
 }
 
-async function liveMlbBoard({ force = false } = {}) {
+async function liveKalshiBoard(sport, { force = false } = {}) {
+  const cache = liveCaches[sport.key];
   const now = Date.now();
-  if (!force && now - liveCache.at < LIVE_TTL_MS && liveCache.board.length) return liveCache.board;
+  if (!force && now - cache.at < LIVE_TTL_MS && cache.board.length) return cache.board;
   const nowMs = kalshiProvider().serverNow();
   const today = etDateStr(nowMs);
 
   // Scope to TODAY by the date baked into the ticker (reliable), which also drops
   // future-day duplicates of the same matchup.
-  const games = await kalshiProvider().listMlbGames({ status: 'open', limit: 400 });
-  let board = mlbGamesToCandidates(games, nowMs).filter((c) => mlbTickerDate(c.ticker) === today);
+  const games = await kalshiProvider().listMlbGames({ seriesTicker: sport.series, status: 'open', limit: 400 });
+  let board = gamesToCandidates(games, nowMs, sport).filter((c) => mlbTickerDate(c.ticker) === today);
 
-  // Authoritative live state from the MLB feed; drop games that are already Final so the
-  // board only shows what you can still act on. If the feed is down, keep the heuristic.
+  // Authoritative live state from the sport's feed; drop games already final so the board
+  // only shows what you can still act on. If the feed is down, keep the heuristic.
   let schedule = null;
-  try { schedule = await fetchLiveGames(today); } catch { schedule = null; }
+  try { schedule = await sport.fetchGames(today); } catch { schedule = null; }
   if (schedule && schedule.length) {
     board = board.filter((c) => {
-      const g = findGameFor(schedule, nickFromKalshi(c.team), nickFromKalshi(c.opponent), c.gameNumber);
-      if (g && g.state === 'Final') return false; // finished — not actionable
-      if (g) annotateFromSchedule(c, g);
+      const g = sport.findGame(schedule, sport.teamKey(c.team), sport.teamKey(c.opponent), c.gameNumber);
+      if (g && sport.isFinal(g)) return false; // finished — not actionable
+      if (g) annotateFromSchedule(c, g, sport);
       return true;
     });
   } else {
-    await annotateLive(board, nowMs);
+    await annotateLive(board, nowMs, sport);
   }
 
-  liveCache = { at: now, board };
+  liveCaches[sport.key] = { at: now, board };
   return board;
 }
 
@@ -475,14 +509,17 @@ const api = {
 
   // ---- LIVE Kalshi board (real prices, read-only) -------------------------
   // Config/connectivity status for the UI's live-mode banner. No secrets returned.
-  'GET /api/live/status': () => {
+  'GET /api/live/status': (body) => {
     const p = kalshiProvider();
+    const sport = sportFor(body.sport);
     return {
       live: {
         configured: p.isConfigured,
         source: p.source,
         base: liveBaseLabel(p.baseUrl),
         verified: p.verified,
+        sport: sport.key,
+        sports: Object.values(SPORTS).map((s) => ({ key: s.key, label: s.label, emoji: s.emoji })),
         note: p.isConfigured
           ? 'Read-only live prices. The app never places orders.'
           : '🔴 NOT VERIFIED — add Kalshi credentials to .env (see KALSHI_SETUP.md).',
@@ -490,52 +527,59 @@ const api = {
     };
   },
 
-  // Real MLB board from Kalshi, ranked by the same edge/EV engine — always the LIVE book.
+  // Real board from Kalshi for the chosen sport, ranked by the edge/EV engine — LIVE book.
   'POST /api/live/board': async (body) => {
     const bk = books.live;
-    const board = await liveMlbBoard();
+    const sport = sportFor(body.sport);
+    const board = await liveKalshiBoard(sport);
     return {
       livegame: buildPreGameReport(bk.engine.snapshot(), board, {
         feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), mode: 'LIVE', ...sizingOpts(body),
       }),
       candidates: board, // raw real-price board so ranking/pre-game/replacements can reuse it
-      asOf: new Date(liveCache.at).toISOString(),
-      priced: board.length,
-      source: 'KALSHI',
+      asOf: new Date(liveCaches[sport.key].at).toISOString(),
+      priced: board.length, source: 'KALSHI', sport: sport.key,
       base: liveBaseLabel(kalshiProvider().baseUrl),
     };
   },
 
   // Sync OPEN live positions to live data + auto-settle finished games — LIVE book only.
+  // Positions carry their own sport, so a mixed book (MLB + NFL) syncs each correctly.
   'POST /api/live/sync': async () => {
     const bk = books.live;
     const engine = bk.engine;
-    const board = await liveMlbBoard();
-    const priceByTicker = new Map(board.map((c) => [c.ticker, c.priceCents]));
-    let games = [];
-    try { games = await fetchLiveGames(etDateStr(kalshiProvider().serverNow())); } catch { /* keep going */ }
+    const nowMs = kalshiProvider().serverNow();
+    const priceByTicker = new Map();
+    const schedules = {};                 // sport key -> today's games (fetched once each)
+    for (const s of Object.values(SPORTS)) {
+      try { for (const c of await liveKalshiBoard(s)) priceByTicker.set(c.ticker, c.priceCents); } catch { /* skip */ }
+    }
     let priced = 0, stated = 0;
     const autoSettled = [];
     for (const p of engine.positions) {
       if (p.status !== 'open') continue;
-      // Match the SPECIFIC game (game 1 vs 2 of a doubleheader) via the ticker's game number.
-      const g = findGameFor(games, nickFromKalshi(p.team), nickFromKalshi(p.opponent), mlbTickerGameNumber(p.ticker));
-      // Auto-settle the LIVE paper ledger from the real result once the game is Final.
+      const sport = sportFor(p.sport || sportOfTicker(p.ticker));
+      if (schedules[sport.key] === undefined) {
+        try { schedules[sport.key] = await sport.fetchGames(etDateStr(nowMs)); } catch { schedules[sport.key] = null; }
+      }
+      const games = schedules[sport.key] || [];
+      const g = sport.findGame(games, sport.teamKey(p.team), sport.teamKey(p.opponent), sport.gameNumber(p.ticker));
+      // Auto-settle the LIVE paper ledger from the real result once the game is final.
       // Never touches real money on Kalshi — only records the outcome you'd have had.
-      const winner = winnerNick(g);
+      const winner = sport.winner(g);
       if (winner) {
-        const outcome = nickFromKalshi(p.team) === winner ? 'win' : 'loss';
+        const outcome = sport.teamKey(p.team) === winner ? 'win' : 'loss';
         recordDecision(bk.history, engine.settle(p.id, outcome));
-        autoSettled.push({ team: p.team, outcome, score: `${g.away} ${g.awayScore}–${g.homeScore} ${g.home}` });
+        autoSettled.push({ team: p.team, outcome, score: scoreLine(g) });
         continue; // settled — no more price/state updates for this one
       }
       const px = priceByTicker.get(p.ticker);
       if (px != null) { engine.setPrice(p.ticker, px); priced++; }
       if (g) {
-        // In progress -> inning + score; Final(tie/rare) -> final; not underway yet
+        // In progress -> inning/quarter + score; final tie -> final; not underway yet
         // (warmup / scheduled / other DH game) -> clear so it never shows a wrong score.
-        const gs = isInProgress(g) ? `${inningLabel(g)} · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
-          : g.state === 'Final' ? `Final · ${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`
+        const gs = sport.isInProgress(g) ? `${sport.stateLabel(g)} · ${scoreLine(g)}`
+          : sport.isFinal(g) ? `Final · ${scoreLine(g)}`
           : '';
         engine.setGameState(p.id, gs); stated++;
       }
@@ -547,15 +591,15 @@ const api = {
   // Force a fresh pull (bypass the cache), e.g. on "u"/"update"/"refresh".
   'POST /api/live/refresh': async (body) => {
     const bk = books.live;
-    const board = await liveMlbBoard({ force: true });
+    const sport = sportFor(body.sport);
+    const board = await liveKalshiBoard(sport, { force: true });
     return {
       livegame: buildPreGameReport(bk.engine.snapshot(), board, {
         feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), mode: 'LIVE', ...sizingOpts(body),
       }),
-      candidates: board, // raw real-price board so ranking/pre-game/replacements can reuse it
-      asOf: new Date(liveCache.at).toISOString(),
-      priced: board.length,
-      source: 'KALSHI',
+      candidates: board,
+      asOf: new Date(liveCaches[sport.key].at).toISOString(),
+      priced: board.length, source: 'KALSHI', sport: sport.key,
       base: liveBaseLabel(kalshiProvider().baseUrl),
     };
   },
@@ -683,6 +727,8 @@ const server = createServer(async (req, res) => {
     // Which book this request touches: from the body (POST) or ?mode= (GET). Default sim.
     const rawMode = (body && body.mode) || url.searchParams.get('mode') || 'sim';
     const mode = rawMode === 'live' ? 'live' : 'sim';
+    // Which sport (live endpoints): body.sport (POST) or ?sport= (GET). Default mlb.
+    body.sport = (body && body.sport) || url.searchParams.get('sport') || 'mlb';
     const result = await handler(body, mode);
     if (MUTATING.has(url.pathname)) persist();
     return sendJson(res, 200, { ok: true, ...result });

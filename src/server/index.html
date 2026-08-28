@@ -212,6 +212,7 @@
       <span class="tag">scan live games and jump in mid-game</span><span class="chev">▾</span></h2>
     <div class="body">
       <div class="row" style="margin-bottom:10px">
+        <div class="live-only" style="flex:0 0 auto;display:none"><label>Sport</label><select id="liveSportSel" onchange="setLiveSport(this.value)"><option value="mlb">⚾ MLB</option><option value="nfl">🏈 NFL</option></select></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
@@ -322,6 +323,8 @@ function toggle(h) {
 // (read-only); the clock-simulation controls are simulation-only and hide themselves.
 let appMode = localStorage.getItem('appMode') === 'live' ? 'live' : 'sim';
 const isLive = () => appMode === 'live';
+// Which live sport the board/positions use (Kalshi + feed). Persisted; default MLB.
+let liveSport = localStorage.getItem('liveSport') || 'mlb';
 // Live Game Board endpoints, chosen by mode: real Kalshi vs the simulated slate.
 const liveBoardPath = () => (isLive() ? '/api/live/board' : '/api/livegame');
 const liveRefreshPath = () => (isLive() ? '/api/live/refresh' : '/api/livegame/refresh');
@@ -333,6 +336,7 @@ async function applyMode() {
   if (l) l.classList.toggle('active', appMode === 'live');
   // History link opens the tab for the current mode.
   const hist = $('historyLink'); if (hist) hist.href = '/history?mode=' + appMode;
+  const ss = $('liveSportSel'); if (ss) ss.value = liveSport; // reflect chosen live sport
   // Hide simulation-only clock controls in live mode (real games don't take a fake clock),
   // and reveal live-only controls (auto-refresh) instead.
   document.querySelectorAll('.sim-only').forEach((b) => { b.style.display = isLive() ? 'none' : ''; });
@@ -371,6 +375,14 @@ function setMode(m) {
   refresh().catch(() => {});
   livegame().catch(() => {});
 }
+// Switch the live sport (⚾ MLB / 🏈 NFL): remember it and reload the board + positions.
+function setLiveSport(s) {
+  liveSport = (s === 'nfl') ? 'nfl' : 'mlb';
+  localStorage.setItem('liveSport', liveSport);
+  const sel = $('liveSportSel'); if (sel) sel.value = liveSport;
+  livegame().catch(() => {});
+  refresh().catch(() => {});
+}
 
 // Current sizing preference: fixed dollar stake, or size-to-target.
 function sizing() {
@@ -386,11 +398,11 @@ async function call(path, body) {
   // Tag every request with the current mode so the server hits the right book
   // (SIMULATION vs LIVE) — they never share a bankroll, positions, or history.
   const isPost = body !== undefined && body !== null;
-  const url = isPost ? path : path + (path.includes('?') ? '&' : '?') + 'mode=' + appMode;
+  const url = isPost ? path : path + (path.includes('?') ? '&' : '?') + 'mode=' + appMode + '&sport=' + liveSport;
   const res = await fetch(url, {
     method: isPost ? 'POST' : 'GET',
     headers: isPost ? { 'Content-Type': 'application/json' } : {},
-    body: isPost ? JSON.stringify({ ...body, mode: appMode }) : undefined,
+    body: isPost ? JSON.stringify({ ...body, mode: appMode, sport: liveSport }) : undefined,
   });
   const data = await res.json();
   if (!res.ok || data.ok === false) throw new Error(data.error || 'request failed');
@@ -1072,7 +1084,7 @@ function renderLiveGame(pg) {
     '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button></div>';
   if (!pg.actionRanking.length) {
     html += live
-      ? '<p class="muted">✅ No games left today — all of today\'s MLB games are final (or none are on the board yet). Tomorrow\'s slate appears once those games are underway.</p>'
+      ? `<p class="muted">✅ No ${liveSport.toUpperCase()} games on the board right now — today's are final or none are listed yet. They appear here on game days.</p>`
       : '<p class="muted">No live games right now.</p>';
   }
   // Live games first so they're front-and-center.

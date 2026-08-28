@@ -24,24 +24,27 @@ export const KALSHI_DEMO = 'https://external-api.demo.kalshi.co/trade-api/v2';
 
 /** Kalshi's MLB "game winner" series (each event = one game, one market per team side). */
 export const KALSHI_MLB_SERIES = 'KXMLBGAME';
+/** Kalshi's NFL "game winner" series (same ticker shape as MLB). */
+export const KALSHI_NFL_SERIES = 'KXNFLGAME';
 
 const TICKER_MONTHS = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
 /**
- * The game DATE encoded in an MLB ticker, e.g. "KXMLBGAME-26AUG161920SEAHOU-SEA" -> "2026-08-16".
- * This is the reliable game day (Kalshi's occurrence_datetime field can be hours off), so we
- * use it to scope the board to today and reject future-day duplicates of the same matchup.
+ * The game DATE encoded in a per-game ticker, e.g. "KXMLBGAME-26AUG161920SEAHOU-SEA" or
+ * "KXNFLGAME-26SEP20WASDAL-WAS" -> "2026-08-16" / "2026-09-20". Works for any KX*GAME series
+ * (MLB, NFL, …). It's the reliable game day (Kalshi's occurrence_datetime can be hours off),
+ * used to scope the board to today and reject future-day duplicates.
  */
 export function mlbTickerDate(ticker) {
-  const m = /KXMLBGAME-(\d{2})([A-Z]{3})(\d{2})/.exec(ticker || '');
+  const m = /KX[A-Z]+GAME-(\d{2})([A-Z]{3})(\d{2})/.exec(ticker || '');
   if (!m) return null;
   const mm = TICKER_MONTHS[m[2]];
   return mm ? `20${m[1]}-${mm}-${m[3]}` : null;
 }
 
 /**
- * Doubleheader game number from an MLB ticker, e.g. "…STLCING2-STL" -> 2, "…STLCING1" -> 1.
- * Returns null for a single game (no G# suffix). The regex is end-anchored so the "G1" in a
- * date like "AUG19" can't false-match. Used to tell the two games of a doubleheader apart.
+ * Doubleheader game number from a ticker, e.g. "…STLCING2-STL" -> 2, "…STLCING1" -> 1.
+ * Returns null for a single game (no G# suffix) — the normal case, and always for NFL.
+ * The regex is end-anchored so the "G1" in a date like "AUG19" can't false-match.
  */
 export function mlbTickerGameNumber(ticker) {
   const m = /G(\d)(?:-[A-Z0-9]+)?$/.exec(ticker || '');
@@ -195,14 +198,15 @@ export class KalshiMarketProvider extends MarketProvider {
   }
 
   /**
-   * List MLB "game winner" markets, grouped into games. Each game pairs the two team
-   * sides (home/away) with real YES prices in cents and a VERIFIED flag when priced.
+   * List a sport's "game winner" markets, grouped into games. Each game pairs the two
+   * team sides with real YES prices in cents and a VERIFIED flag when priced. Works for
+   * any KX*GAME series (defaults to MLB); pass seriesTicker for NFL etc.
    *
    * Optionally scope to a time window around now (hours behind/ahead of the scheduled
    * start) so callers can show just "today's slate" instead of every listed day.
    */
-  async listMlbGames({ status = 'open', limit = 300, withinHoursAhead, withinHoursBehind = 6 } = {}) {
-    const markets = await this.listMarkets({ seriesTicker: KALSHI_MLB_SERIES, status, limit });
+  async listMlbGames({ seriesTicker = KALSHI_MLB_SERIES, status = 'open', limit = 300, withinHoursAhead, withinHoursBehind = 6 } = {}) {
+    const markets = await this.listMarkets({ seriesTicker, status, limit });
     const byEvent = new Map();
     for (const raw of markets) {
       const m = normalizeMarket(raw);
