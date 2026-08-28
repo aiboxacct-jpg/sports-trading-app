@@ -22,9 +22,10 @@ import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js
 import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
-import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, KALSHI_MLB_SERIES, KALSHI_NFL_SERIES, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
+import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, KALSHI_MLB_SERIES, KALSHI_NFL_SERIES, KALSHI_NHL_SERIES, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
 import * as mlbFeed from '../data/mlbLiveFeed.js';
 import * as nflFeed from '../data/nflLiveFeed.js';
+import * as nhlFeed from '../data/nhlLiveFeed.js';
 import { etDateStr } from '../data/mlbLiveFeed.js'; // ET game-day helper — sport-agnostic
 
 // ---- sport registry: one entry per supported live sport. Each bundles its Kalshi
@@ -52,10 +53,22 @@ const SPORTS = {
     winner: nflFeed.winnerAbbr,            // -> winning abbr | null (tie -> push)
     gameNumber: () => null,                // NFL has no doubleheaders
   },
+  nhl: {
+    key: 'nhl', label: 'NHL', emoji: '🏒', series: KALSHI_NHL_SERIES,
+    teamKey: nhlFeed.abbrFromKalshi,
+    fetchGames: nhlFeed.fetchLiveGames,
+    findGame: nhlFeed.findGameFor,
+    isInProgress: nhlFeed.isInProgress,
+    isFinal: (g) => g.state === 'post',
+    stateLabel: nhlFeed.periodLabel,       // "P2 5:20" / "OT" / "Shootout"
+    winner: nhlFeed.winnerAbbr,
+    gameNumber: () => null,                // NHL has no doubleheaders
+  },
 };
 const sportFor = (s) => SPORTS[s] || SPORTS.mlb;
 // Infer a position's sport from its ticker when the field isn't stored (older positions).
-const sportOfTicker = (t) => (/^KXNFLGAME/.test(t || '') ? 'nfl' : 'mlb');
+const sportOfTicker = (t) =>
+  /^KXNFLGAME/.test(t || '') ? 'nfl' : /^KXNHLGAME/.test(t || '') ? 'nhl' : 'mlb';
 // A game's score line, e.g. "Orioles 2–1 Rays" (MLB) or "WSH 17–21 DAL" (NFL).
 const scoreLine = (g) => `${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
 
@@ -73,7 +86,7 @@ function kalshiProvider() {
   return kalshi;
 }
 const LIVE_TTL_MS = 8000;
-const liveCaches = { mlb: { at: 0, board: [] }, nfl: { at: 0, board: [] } }; // per-sport board cache
+const liveCaches = { mlb: { at: 0, board: [] }, nfl: { at: 0, board: [] }, nhl: { at: 0, board: [] } }; // per-sport board cache
 
 // Map Kalshi's grouped games into board candidates (one per priced team side), tagged
 // verified + source so the UI can badge them 🟢 and never confuse them with sim.

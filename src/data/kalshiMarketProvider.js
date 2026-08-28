@@ -26,6 +26,8 @@ export const KALSHI_DEMO = 'https://external-api.demo.kalshi.co/trade-api/v2';
 export const KALSHI_MLB_SERIES = 'KXMLBGAME';
 /** Kalshi's NFL "game winner" series (same ticker shape as MLB). */
 export const KALSHI_NFL_SERIES = 'KXNFLGAME';
+/** Kalshi's NHL "game winner" series (posted once the season nears; same ticker shape). */
+export const KALSHI_NHL_SERIES = 'KXNHLGAME';
 
 const TICKER_MONTHS = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
 /**

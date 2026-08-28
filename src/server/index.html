@@ -212,7 +212,7 @@
       <span class="tag">scan live games and jump in mid-game</span><span class="chev">▾</span></h2>
     <div class="body">
       <div class="row" style="margin-bottom:10px">
-        <div class="live-only" style="flex:0 0 auto;display:none"><label>Sport</label><select id="liveSportSel" onchange="setLiveSport(this.value)"><option value="mlb">⚾ MLB</option><option value="nfl">🏈 NFL</option></select></div>
+        <div class="live-only" style="flex:0 0 auto;display:none"><label>Sport</label><select id="liveSportSel" onchange="setLiveSport(this.value)"><option value="mlb">⚾ MLB</option><option value="nfl">🏈 NFL</option><option value="nhl">🏒 NHL</option></select></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
@@ -377,7 +377,7 @@ function setMode(m) {
 }
 // Switch the live sport (⚾ MLB / 🏈 NFL): remember it and reload the board + positions.
 function setLiveSport(s) {
-  liveSport = (s === 'nfl') ? 'nfl' : 'mlb';
+  liveSport = ['mlb', 'nfl', 'nhl'].includes(s) ? s : 'mlb';
   localStorage.setItem('liveSport', liveSport);
   const sel = $('liveSportSel'); if (sel) sel.value = liveSport;
   livegame().catch(() => {});
