@@ -2,29 +2,17 @@
 
 Parked items, in rough priority order. Nothing here is started yet.
 
-## 🏈 NFL live support (closest to ready — build first)
-**Status:** the most ready of the sports, and time-sensitive.
-- Kalshi **already lists per-game markets**: `KXNFLGAME` (e.g. `KXNFLGAME-26SEP21NYGLAR-NYG`),
-  **same ticker date format as MLB** (`YYMONDD…MATCHUP-SIDE`).
-- Live feed: **ESPN scoreboard API works** —
-  `site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` returns state
-  (pre/in/post), quarter + clock, scores, team abbreviations.
-- Regular season starts ~Sept (preseason on now), so it's **testable within ~2 weeks**.
-
-Work:
-1. `nflLiveFeed.js` against the ESPN NFL scoreboard API: parse pre / in-progress / final,
-   quarter + game clock, scores, winner. Team map Kalshi (`New York G`, `Los Angeles R`, …)
-   → ESPN teams.
-2. Generalize `mlbTickerDate` to any series prefix (the date encoding is identical) so it
-   reads `KXNFLGAME` tickers too.
-3. Sport registry (shared with NHL): `sport → { kalshiSeries, feed, tickerParser, labels }`
-   so all sports reuse the board / sync / auto-settle / edge logic.
-4. NFL specifics: **quarters + clock** labels, **overtime**, and **ties** — regular-season
-   games can end tied, so `winnerNick` needs a "push" case (don't settle win/loss). Weekly
-   slate (Thu/Sun/Mon) means most days have 0 games — today-scoping already handles that.
-5. UI: add 🏈 to the sport toggle.
+## ✅ NFL live support — DONE (2026-08-28)
+Built end to end: `nflLiveFeed.js` (ESPN scoreboard — state/quarter/clock/score/winner,
+ties→push), a shared **sport registry** in the server (MLB + NFL reuse board / sync /
+auto-settle / edge), generalized ticker parser + `listMlbGames(seriesTicker)`, and a
+⚾/🏈 toggle in Live mode. Verified against real Kalshi NFL markets + ESPN data. Still to
+confirm once games are actually being played: live in-progress quarter/clock/score sync
+and NFL auto-settle (preseason games Aug 28 evenings; regular season Sept).
 
 ## 🏒 NHL live support (build closer to the season)
+Now a quick add — the sport registry from NFL is in place, so this is mostly a
+`nhlLiveFeed.js` + one registry entry.
 **Why parked:** it's the NHL offseason (regular season starts ~October). Kalshi has
 **no per-game NHL markets** yet — `KXNHLGAME` is empty; only season futures
 (`KXNHL-27-*`) are listed. And with no games being played we can't test against live
