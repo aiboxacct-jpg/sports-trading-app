@@ -51,6 +51,14 @@ max concurrent exposure. Currently it only warns about heavy concentration.
 A ready-to-place order slip you confirm manually on Kalshi. App stays read-only;
 never submits real-money orders.
 
+## 🎯 External edge data (no personal history needed)
+- ✅ **Live win probability** (2026-08-28) — in-progress picks compare Kalshi to the
+  game feed's live win% (MLB StatsAPI, NFL/NHL ESPN) → real edge from day one.
+- ⏭️ **Pre-game Vegas moneyline** — do the same for games that haven't started, using
+  ESPN summary `pickcenter` (de-vig the moneyline → fair win%), so pre-game picks also
+  show an edge, not just live ones. (`fetchWinProb` pattern already in each feed.)
+- Later: ESPN `predictor`, records/form power-rating as extra baselines.
+
 ## Small niceties
 - Show the 🏦 banked total per book on the History page.
 - Optional: sample size on each pick card ("edge +23% · based on 5 bets").
