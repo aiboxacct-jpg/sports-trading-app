@@ -122,18 +122,25 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical, st
   // enough. Edge = your rate − market. EV uses payout & stake.
   const hist = historical ? historical.fitFor({ kind, priceCents }) : { score: null, sampleSize: 0, rationale: 'Insufficient historical data' };
   const histKnown = hist.score != null;
-  const estProb = histKnown ? hist.score : impliedProb;
+  // Independent live model win probability (0..1) — from the game feed, no personal
+  // history needed. Used as the baseline when history is thin, so edge is real from day 1.
+  const modelProb = cand.modelWinPct != null ? clamp01(cand.modelWinPct / 100) : null;
+  const modelInformed = modelProb != null;
+  const informed = histKnown || modelInformed; // do we have ANY independent estimate?
+  // Prefer your history when it exists, else the live model, else the market itself.
+  const estProb = histKnown ? hist.score : (modelProb ?? impliedProb);
   const edge = estProb - impliedProb;
   const evCents = Math.round(estProb * sized.potentialProfitCents - (1 - estProb) * sized.stakeCents);
   const evPerDollar = evCents / sized.stakeCents;
 
-  // Composite situation score (0–100). When history exists, EV + edge lead (value-first);
-  // without it, market confidence + payout keep the ranking useful and differentiated.
+  // Composite situation score (0–100). With an independent estimate (history OR live
+  // model), EV + edge lead (value-first); without any, market confidence + payout keep
+  // the ranking useful and differentiated.
   const evComp = clamp01(0.5 + evPerDollar);
   const edgeComp = clamp01(0.5 + edge * 2);
   const conf = clamp01(impliedProb);
   const payoutComp = clamp01((payoutMultiple - 1) / 5);
-  const w = histKnown
+  const w = informed
     ? { ev: 0.35, edge: 0.35, conf: 0.2, payout: 0.1 }
     : { ev: 0.1, edge: 0.0, conf: 0.7, payout: 0.2 };
   const score = Math.round(1000 * (w.ev * evComp + w.edge * edgeComp + w.conf * conf + w.payout * payoutComp)) / 10;
@@ -167,6 +174,9 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical, st
     evCents,
     evPctOfStake: Math.round(evPerDollar * 1000) / 10,
     historicallyInformed: histKnown,
+    modelInformed,
+    modelWinPct: cand.modelWinPct ?? null,
+    informed,
     historicalFit: hist.rationale,
     reachesTarget,
     score,
@@ -183,7 +193,9 @@ function narrate(item, targetCents) {
     `cheap entry — ${item.capitalPct}% of cash`;
   const edgeTxt = item.historicallyInformed
     ? `your rate here ${item.estProbPct}% vs market ${p}% → edge ${item.edgePct >= 0 ? '+' : ''}${item.edgePct}%`
-    : `no history yet — using market ${p}%`;
+    : item.modelInformed
+      ? `live model ${item.modelWinPct}% vs market ${p}% → edge ${item.edgePct >= 0 ? '+' : ''}${item.edgePct}%`
+      : `no signal yet — using market ${p}%`;
   const evTxt = `EV ${fmt(item.evCents)} (${item.evPctOfStake >= 0 ? '+' : ''}${item.evPctOfStake}% of stake)`;
   const why = `${tag}; ${edgeTxt}. ${evTxt}, ${item.payoutMultiple}× payout, ${cost}.`;
   const warning = !item.affordable
@@ -246,7 +258,8 @@ export function buildPreGameReport(snapshot, board, { feeRate, historical, stake
       ticker: r.ticker, verified: r.verified, source: r.source, live: r.live, startTime: r.startTime,
       priceCents: r.priceCents, marketProbabilityPct: r.marketProbabilityPct,
       payoutMultiple: r.payoutMultiple, legs: r.legs,
-      edgePct: r.edgePct, evCents: r.evCents, estProbPct: r.estProbPct, historicallyInformed: r.historicallyInformed,
+      edgePct: r.edgePct, evCents: r.evCents, estProbPct: r.estProbPct,
+      historicallyInformed: r.historicallyInformed, modelInformed: r.modelInformed, modelWinPct: r.modelWinPct, informed: r.informed,
       stakeForTargetCents: r.stakeForTargetCents, potentialProfitCents: r.potentialProfitCents,
       capitalPct: r.capitalPct, affordable: r.affordable, gameTime: r.gameTime, gameState: r.gameState,
     })),

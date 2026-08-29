@@ -71,9 +71,30 @@ export function normalizeScheduleGames(json) {
       awayScore: g.teams?.away?.score ?? null,
       homeScore: g.teams?.home?.score ?? null,
       gameNumber: g.gameNumber ?? null, // 1 or 2 for a doubleheader
+      feedId: g.gamePk ?? null,         // StatsAPI game id (for win probability)
       gameDate: g.gameDate || null,
     };
   }).filter((x) => x.away && x.home);
+}
+
+/**
+ * Live model HOME win probability (0..1) from MLB StatsAPI, or null. This is an
+ * independent estimate we compare to the Kalshi price to surface edge — no personal
+ * history needed. Away win prob = 1 - home.
+ */
+export async function fetchWinProb(game, { fetchImpl = fetch, timeoutMs = 6000 } = {}) {
+  if (!game || game.feedId == null) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(`https://statsapi.mlb.com/api/v1/game/${game.feedId}/winProbability`, { signal: ctrl.signal });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const arr = Array.isArray(j) ? j : (j.winProbability || []);
+    const last = arr[arr.length - 1];
+    const h = last?.homeTeamWinProbability;
+    return h == null ? null : Math.max(0, Math.min(1, h / 100));
+  } catch { return null; } finally { clearTimeout(timer); }
 }
 
 /**

@@ -1230,7 +1230,7 @@ function renderPreGame(pg) {
   }
 
   // quick board (edge/value first)
-  html += '<table><thead><tr><th></th><th>Pick</th><th>Kalshi</th><th>Your&nbsp;%</th><th>Edge</th><th>EV</th><th>Payout</th><th>Stake</th><th>%cash</th></tr></thead><tbody>';
+  html += '<table><thead><tr><th></th><th>Pick</th><th>Kalshi</th><th title="your history when you have it, else the live win-probability model">Est&nbsp;%</th><th>Edge</th><th>EV</th><th>Payout</th><th>Stake</th><th>%cash</th></tr></thead><tbody>';
   for (const r of pg.quickBoard) {
     const badge = r.verified ? '<span title="real Kalshi price">🟢</span> ' : '';
     const label = r.kind === 'combo'
@@ -1241,8 +1241,8 @@ function renderPreGame(pg) {
       <td class="medal">${r.medal}</td>
       <td>${label}</td>
       <td>${r.marketProbabilityPct}%</td>
-      <td>${r.historicallyInformed ? r.estProbPct + '%' : '<span class="muted">—</span>'}</td>
-      <td class="${edgeCls}">${r.historicallyInformed ? (r.edgePct >= 0 ? '+' : '') + r.edgePct + '%' : '<span class="muted">n/a</span>'}</td>
+      <td>${r.informed ? r.estProbPct + '%' + (r.modelInformed && !r.historicallyInformed ? ' <span class="muted" title="live win-probability model">📡</span>' : '') : '<span class="muted">—</span>'}</td>
+      <td class="${edgeCls}">${r.informed ? (r.edgePct >= 0 ? '+' : '') + r.edgePct + '%' : '<span class="muted">n/a</span>'}</td>
       <td class="${cls(r.evCents)}">${fmt(r.evCents)}</td>
       <td><b>${r.payoutMultiple}×</b></td>
       <td>${fmt(r.stakeForTargetCents)}${r.affordable ? '' : ' <span class="neg">⚠️</span>'}</td>

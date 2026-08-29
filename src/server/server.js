@@ -40,6 +40,7 @@ const SPORTS = {
     isFinal: (g) => g.state === 'Final',
     stateLabel: mlbFeed.inningLabel,       // "Top 4th"
     winner: mlbFeed.winnerNick,            // -> winning key | null (tie/not final)
+    winProb: mlbFeed.fetchWinProb,         // -> HOME live win prob 0..1 (independent edge)
     gameNumber: mlbTickerGameNumber,       // doubleheaders (MLB only)
   },
   nfl: {
@@ -51,6 +52,7 @@ const SPORTS = {
     isFinal: (g) => g.state === 'post',
     stateLabel: nflFeed.quarterLabel,      // "Q3 5:20"
     winner: nflFeed.winnerAbbr,            // -> winning abbr | null (tie -> push)
+    winProb: nflFeed.fetchWinProb,
     gameNumber: () => null,                // NFL has no doubleheaders
   },
   nhl: {
@@ -62,6 +64,7 @@ const SPORTS = {
     isFinal: (g) => g.state === 'post',
     stateLabel: nhlFeed.periodLabel,       // "P2 5:20" / "OT" / "Shootout"
     winner: nhlFeed.winnerAbbr,
+    winProb: nhlFeed.fetchWinProb,
     gameNumber: () => null,                // NHL has no doubleheaders
   },
 };
@@ -140,6 +143,45 @@ function annotateFromSchedule(c, g, sport) {
   }
 }
 
+// Attach an independent live win probability (per team) to in-progress candidates, so the
+// ranking has real edge even with no personal history. Cached briefly; failures are silent.
+const WP_TTL_MS = 15000;
+const wpCache = new Map(); // "sport:feedId" -> { at, homeWinPct }
+async function cachedWinProb(sport, g) {
+  const key = `${sport.key}:${g.feedId}`;
+  const hit = wpCache.get(key);
+  if (hit && Date.now() - hit.at < WP_TTL_MS) return hit.homeWinPct;
+  let p = null;
+  try { p = await sport.winProb(g); } catch { p = null; }
+  wpCache.set(key, { at: Date.now(), homeWinPct: p });
+  return p;
+}
+async function attachModelWinProb(board, schedule, sport) {
+  if (!sport.winProb || !schedule || !schedule.length) return;
+  const gameFor = (c) => sport.findGame(schedule, sport.teamKey(c.team), sport.teamKey(c.opponent), c.gameNumber);
+  // Unique in-progress games among the board's live candidates.
+  const games = new Map();
+  for (const c of board) {
+    if (!c.live) continue;
+    const g = gameFor(c);
+    if (g && g.feedId != null) games.set(g.feedId, g);
+  }
+  const homePctByGame = new Map();
+  await Promise.all([...games.values()].map(async (g) => {
+    const p = await cachedWinProb(sport, g);
+    if (p != null) homePctByGame.set(g.feedId, p);
+  }));
+  for (const c of board) {
+    if (!c.live) continue;
+    const g = gameFor(c);
+    const home = g && homePctByGame.get(g.feedId);
+    if (home == null) continue;
+    const isHome = sport.teamKey(c.team) === g.home;
+    c.modelWinPct = Math.round((isHome ? home : 1 - home) * 1000) / 10; // 0..100, 1 dp
+    c.modelSource = 'live win prob';
+  }
+}
+
 // Fallback overlay when the sport's feed is unreachable: keep the occurrence heuristic.
 async function annotateLive(board, nowMs, sport) {
   let games;
@@ -174,6 +216,7 @@ async function liveKalshiBoard(sport, { force = false } = {}) {
       if (g) annotateFromSchedule(c, g, sport);
       return true;
     });
+    await attachModelWinProb(board, schedule, sport); // independent live edge
   } else {
     await annotateLive(board, nowMs, sport);
   }

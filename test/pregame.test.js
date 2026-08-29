@@ -5,6 +5,27 @@ import { stakeForTarget, fixedStake, buildPreGameReport, addCombos } from '../sr
 import { SimEngine } from '../src/engine/simEngine.js';
 import { HistoricalDecisionEngine } from '../src/ranking/historicalDecisionEngine.js';
 
+test('live model win prob drives real edge with NO personal history', () => {
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  const board = [{ id: 'a', team: 'Detroit', opponent: 'LA', kind: 'single', priceCents: 72, modelWinPct: 82.4, verified: true }];
+  const pg = buildPreGameReport(eng.snapshot(), board, { feeRate: eng.feeRate, historical: new HistoricalDecisionEngine([], { minSample: 3 }) });
+  const it = pg.actionRanking[0];
+  assert.equal(it.historicallyInformed, false);   // no history
+  assert.equal(it.modelInformed, true);            // but the model informs it
+  assert.equal(it.informed, true);
+  assert.equal(it.modelWinPct, 82.4);
+  assert.ok(Math.abs(it.edgePct - 10.4) < 0.6, `edge should be ~+10.4, got ${it.edgePct}`); // 82.4 - 72
+  assert.match(it.why, /live model 82.4% vs market 72%/);
+});
+
+test('with no model and no history, edge is n/a (falls back to market)', () => {
+  const eng = new SimEngine({ startingBankrollCents: 10000, targetCents: 500 });
+  const board = [{ id: 'a', team: 'X', opponent: 'Y', kind: 'single', priceCents: 60 }];
+  const it = buildPreGameReport(eng.snapshot(), board, { feeRate: eng.feeRate, historical: new HistoricalDecisionEngine([], { minSample: 3 }) }).actionRanking[0];
+  assert.equal(it.informed, false);
+  assert.equal(it.edgePct, 0); // estProb == market
+});
+
 test('stakeForTarget: the WIN actually clears the target, net of fees', () => {
   // Yankees @59¢, +$5 target. profit/contract = 41¢, ceil(500/41)=13 contracts.
   const r = stakeForTarget(59, 500);

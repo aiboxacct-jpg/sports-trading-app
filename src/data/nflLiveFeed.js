@@ -65,9 +65,26 @@ export function normalizeScheduleGames(json) {
       detail: type.name ?? null,   // STATUS_SCHEDULED | STATUS_IN_PROGRESS | STATUS_HALFTIME | STATUS_FINAL ...
       period: st.period ?? null,   // quarter (5 = OT)
       clock: st.displayClock ?? null,
+      feedId: g.id ?? null,        // ESPN event id (for win probability)
       date: g.date ?? null,
     };
   }).filter((x) => x.away && x.home);
+}
+
+/** Live model HOME win probability (0..1) from ESPN's game summary, or null. */
+export async function fetchWinProb(game, { fetchImpl = fetch, timeoutMs = 6000 } = {}) {
+  if (!game || game.feedId == null) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${game.feedId}`, { signal: ctrl.signal });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const arr = j.winprobability || [];
+    const last = arr[arr.length - 1];
+    const h = last?.homeWinPercentage;
+    return h == null ? null : Math.max(0, Math.min(1, Number(h)));
+  } catch { return null; } finally { clearTimeout(timer); }
 }
 
 /** Find the normalized game matching two abbreviations (either home/away order). */

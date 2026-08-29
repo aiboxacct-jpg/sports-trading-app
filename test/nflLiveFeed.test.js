@@ -3,8 +3,15 @@ import assert from 'node:assert/strict';
 
 import {
   abbrFromKalshi, isInProgress, quarterLabel, winnerAbbr,
-  normalizeScheduleGames, findGameFor, fetchLiveGames,
+  normalizeScheduleGames, findGameFor, fetchLiveGames, fetchWinProb,
 } from '../src/data/nflLiveFeed.js';
+
+test('fetchWinProb returns the latest ESPN home win % (0..1)', async () => {
+  const okFetch = async () => ({ ok: true, json: async () => ({ winprobability: [{ homeWinPercentage: 0.4 }, { homeWinPercentage: 0.0103 }] }) });
+  assert.ok(Math.abs(await fetchWinProb({ feedId: '123' }, { fetchImpl: okFetch }) - 0.0103) < 1e-9);
+  assert.equal(await fetchWinProb({ feedId: null }, { fetchImpl: okFetch }), null);      // no id
+  assert.equal(await fetchWinProb({ feedId: '1' }, { fetchImpl: async () => ({ ok: false }) }), null); // error -> null
+});
 
 // A tiny ESPN-shaped scoreboard fixture.
 const espn = (over = {}) => ({

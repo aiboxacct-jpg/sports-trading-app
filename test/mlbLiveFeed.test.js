@@ -3,8 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
   nickFromKalshi, nickFromStatsName, inningLabel,
-  normalizeScheduleGames, findGameFor, etDateStr, fetchLiveGames, winnerNick, isInProgress,
+  normalizeScheduleGames, findGameFor, etDateStr, fetchLiveGames, winnerNick, isInProgress, fetchWinProb,
 } from '../src/data/mlbLiveFeed.js';
+
+test('fetchWinProb reads latest StatsAPI home win prob (0-100 -> 0..1)', async () => {
+  const okFetch = async () => ({ ok: true, json: async () => ([{ homeTeamWinProbability: 60 }, { homeTeamWinProbability: 82 }]) });
+  assert.ok(Math.abs(await fetchWinProb({ feedId: 824638 }, { fetchImpl: okFetch }) - 0.82) < 1e-9);
+  assert.equal(await fetchWinProb({ feedId: null }, { fetchImpl: okFetch }), null);
+});
 
 test('nickFromKalshi maps disambiguated shared-city labels', () => {
   assert.equal(nickFromKalshi('Baltimore'), 'Orioles');
