@@ -1071,7 +1071,7 @@ function renderLiveGame(pg) {
     html += `<div style="font-weight:800;margin-bottom:6px">🟢 LIVE GAME BOARD <span class="muted" style="font-weight:500">— real Kalshi prices (${pg.base || 'PRODUCTION'}, read-only)${pg.priced != null ? ' · ' + pg.priced + ' markets' : ''}${asOf ? ' · as of ' + asOf : ''}</span></div>`;
     // Blinking count of games actually in progress right now (only when there are games).
     if (liveCount) {
-      html += `<div style="margin:2px 0 6px"><span class="live-badge">🔴 LIVE</span> <span class="live-count">${liveCount} game${liveCount === 1 ? '' : 's'} in progress now</span> <span class="muted" style="font-size:11px">— live inning &amp; score from MLB</span></div>`;
+      html += `<div style="margin:2px 0 6px"><span class="live-badge">🔴 LIVE</span> <span class="live-count">${liveCount} game${liveCount === 1 ? '' : 's'} in progress now</span> <span class="muted" style="font-size:11px">— live state &amp; score from the feed</span></div>`;
     } else if (pg.actionRanking.length) {
       html += `<div style="margin:2px 0 6px" class="muted" style="font-size:12px">⏰ No games live yet — upcoming games show their start time.</div>`;
     }
@@ -1142,10 +1142,19 @@ function clearPickSelection() {
   document.querySelectorAll('.pick-card.selected').forEach((c) => c.classList.remove('selected'));
 }
 
+// These buttons live in BOTH the Pre-Game report and the Live Game Board, so show
+// feedback in whichever error box is on screen (and flash it), never an invisible one.
+function pickActionMsg(msg) {
+  if ($('rankErr')) $('rankErr').textContent = msg;
+  if ($('livegameErr')) $('livegameErr').textContent = msg;
+  if (msg) flashDecision(msg);
+}
+function clearPickActionMsg() { if ($('rankErr')) $('rankErr').textContent = ''; if ($('livegameErr')) $('livegameErr').textContent = ''; }
+
 function stageSelected() {
   const picks = getSelectedPicks();
-  if (!picks.length) { $('rankErr').textContent = 'Click one or more picks first.'; return; }
-  $('rankErr').textContent = '';
+  if (!picks.length) { pickActionMsg('👆 Click a pick card to select it first (it turns blue), then Stage.'); return; }
+  clearPickActionMsg();
   picks.forEach((p) => stageRow(p));
   clearPickSelection();
   document.querySelector('.area.pre h2:nth-of-type(2)')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1154,8 +1163,8 @@ function stageSelected() {
 // Open the selected picks immediately at their target stake — no staging step.
 async function openSelectedNow() {
   const picks = getSelectedPicks();
-  if (!picks.length) { $('rankErr').textContent = 'Click the picks you want to open first.'; return; }
-  $('rankErr').textContent = '';
+  if (!picks.length) { pickActionMsg('👆 Click a pick card to select it first (it turns blue), then Open selected now.'); return; }
+  clearPickActionMsg();
   const unaffordable = picks.filter((p) => !p.affordable).length;
   if (unaffordable && !confirm(`${unaffordable} selected pick(s) exceed your available cash. Open anyway?`)) return;
   try {
@@ -1168,8 +1177,9 @@ async function openSelectedNow() {
     }
     clearPickSelection();
     await refresh();
+    flashDecision(`✅ Opened ${picks.length} position${picks.length === 1 ? '' : 's'}.`);
     document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (e) { $('rankErr').textContent = e.message; }
+  } catch (e) { pickActionMsg(e.message); }
 }
 async function openRowFrom(tr) {
   await call('/api/open', {
