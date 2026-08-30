@@ -757,6 +757,7 @@ const api = {
       id: c.id || `cand-${i + 1}`,
       team: c.team,
       opponent: c.opponent,
+      ticker: c.ticker || null,   // keep the real Kalshi market id so entries track live
       kind: c.kind === 'combo' ? 'combo' : 'single',
       priceCents: c.priceCents == null ? null : int(c.priceCents),
       gameTime: c.gameTime || null,

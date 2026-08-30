@@ -370,6 +370,11 @@ function setMode(m) {
   appMode = m === 'live' ? 'live' : 'sim';
   localStorage.setItem('appMode', appMode);
   stopPlay();
+  // Clear the Quick-rank / Pre-Game output: it belongs to the OTHER mode's games, and
+  // clicking a stale row would open the wrong sport/book. Force a fresh scan per mode.
+  if ($('rankOut')) $('rankOut').innerHTML = '';
+  if ($('pregameOut')) $('pregameOut').innerHTML = '';
+  lastRanking = null; lastPregame = null;
   applyMode();
   // Load THIS book's positions/bankroll/history + board so the switch is immediate.
   refresh().catch(() => {});
@@ -1318,9 +1323,9 @@ async function openQuickPick(i) {
   const p = lastRanking && lastRanking.ranked[i];
   if (!p) return;
   try {
-    await call('/api/open', { team: p.team, opponent: p.opponent, ticker: p.ticker || p.team, kind: p.kind, priceCents: p.priceCents, stakeDollars: +$('rStake').value });
+    await call('/api/open', { team: p.team, opponent: p.opponent, ticker: p.ticker || p.team, kind: p.kind, priceCents: p.priceCents, stakeDollars: +$('rStake').value, gameState: p.gameState || null });
     await refresh();
-    flashDecision(`Entered ${p.team ?? p.ticker}`);
+    flashDecision(`✅ Entered ${p.team ?? p.ticker}`);
     document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) { $('rankErr').textContent = e.message; }
 }
