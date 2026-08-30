@@ -15,7 +15,7 @@ Two ways — the Blueprint is fastest:
 **B) Manual (if you prefer clicking)**
 1. Render → **New +** → **Web Service** → connect this repo.
 2. Runtime **Node**, Build `npm install`, Start `node src/server/server.js`.
-3. Plan **Starter** (needed for the persistent disk in step 3). Health check path `/healthz`.
+3. Plan **Free**. Health check path `/healthz`.
 
 ## 2. Set the environment variables (Environment tab)
 | Key | Value |
@@ -25,16 +25,20 @@ Two ways — the Blueprint is fastest:
 | `KALSHI_PRIVATE_KEY` | paste the **full PEM** (BEGIN…END, multi-line is fine) |
 | `AUTH_USER` | e.g. `admin` |
 | `AUTH_PASS` | **a strong password** — this is your login |
-| `STATE_FILE` | `/data/sim-state.json` (only if you added the disk) |
 
 > Tip: use `KALSHI_PRIVATE_KEY` (inline) rather than a file — no upload needed. Never
 > commit these; they live only in Render.
 
-## 3. Persistent storage (keeps your paper ledger across deploys)
-- **Starter+**: add a **Disk** — name `data`, mount path `/data`, size 1 GB — and set
-  `STATE_FILE=/data/sim-state.json`. (The Blueprint already does this.)
-- **Free plan**: no disk available, so the sim/live ledgers **reset on each redeploy**.
-  Fine for testing; upgrade to Starter to keep history.
+## 3. Storage — free vs paid
+- **Free (default):** no persistent disk, so the sim/live **paper ledgers reset on each
+  redeploy and after a cold start**. Everything else (live boards, edges, auth, custom
+  domain) works fully. Great for using and testing.
+- **Keep history across restarts (Starter, $7/mo):** change `plan: free` → `plan: starter`
+  in `render.yaml`, add a **Disk** (name `data`, mount `/data`, 1 GB), and set env
+  `STATE_FILE=/data/sim-state.json`. That's the only difference.
+
+> Free note: the service sleeps after ~15 min idle; the first visit after that takes
+> ~30–60s to wake, then it's fast again.
 
 ## 4. Deploy & verify
 1. Render builds and starts it; watch the log for
