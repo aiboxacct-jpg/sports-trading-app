@@ -1,0 +1,33 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# In Render: New + -> Blueprint -> pick this repo. It creates the service below.
+# Secrets (sync:false) are NOT stored here — you set them in the Render dashboard.
+services:
+  - type: web
+    name: sports-trading-app
+    runtime: node
+    plan: starter                 # Starter ($7/mo) supports the persistent disk below.
+                                   # Free works too, but has no disk (paper ledger resets
+                                   # on each deploy) and cold-starts after inactivity.
+    buildCommand: npm install     # zero dependencies -> effectively a no-op
+    startCommand: node src/server/server.js
+    healthCheckPath: /healthz
+    autoDeploy: true              # redeploy on every push to the default branch
+    envVars:
+      # --- non-secret config ---
+      - key: KALSHI_BASE_URL
+        value: https://api.elections.kalshi.com/trade-api/v2   # production (read-only)
+      - key: AUTH_USER
+        value: admin
+      - key: STATE_FILE
+        value: /data/sim-state.json                            # lives on the disk below
+      # --- secrets: set these in the dashboard (Environment tab) ---
+      - key: KALSHI_API_KEY_ID
+        sync: false
+      - key: KALSHI_PRIVATE_KEY          # paste the FULL PEM (multi-line is fine)
+        sync: false
+      - key: AUTH_PASS                   # your login password
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

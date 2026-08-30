@@ -779,6 +779,11 @@ const MUTATING = new Set([
 // ---- request routing ------------------------------------------------------
 const server = createServer(async (req, res) => {
   try {
+    // Health check for the host (Render etc.) — must bypass auth so uptime probes pass.
+    if (req.url === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end('ok');
+    }
     // Gate everything behind Basic Auth when a password is configured.
     if (!authOk(req)) {
       res.writeHead(401, {
