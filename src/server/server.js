@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import crypto from 'node:crypto';
 
 // Load local secrets (Kalshi key id + private key) for LIVE mode. Safe no-op if absent.
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -77,6 +78,28 @@ const scoreLine = (g) => `${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3210;
+
+// ---- HTTP Basic Auth (for hosting on a public domain) ---------------------
+// OFF by default (local dev stays password-free). Set AUTH_PASS in the environment to
+// require a login on every request — do this whenever the app is reachable publicly.
+const AUTH_USER = process.env.AUTH_USER || 'admin';
+const AUTH_PASS = process.env.AUTH_PASS || '';
+const AUTH_ENABLED = AUTH_PASS.length > 0;
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+function authOk(req) {
+  if (!AUTH_ENABLED) return true;
+  const m = /^Basic (.+)$/.exec(req.headers['authorization'] || '');
+  if (!m) return false;
+  let decoded = '';
+  try { decoded = Buffer.from(m[1], 'base64').toString('utf8'); } catch { return false; }
+  const i = decoded.indexOf(':');
+  if (i < 0) return false;
+  // constant-time compare on both fields so timing can't leak the password
+  return safeEqual(decoded.slice(0, i), AUTH_USER) & safeEqual(decoded.slice(i + 1), AUTH_PASS);
+}
 const STATE_FILE = process.env.STATE_FILE || join(__dirname, '../../data/sim-state.json');
 
 // ---- LIVE Kalshi data (read-only; NEVER places orders) --------------------
@@ -755,6 +778,14 @@ const MUTATING = new Set([
 // ---- request routing ------------------------------------------------------
 const server = createServer(async (req, res) => {
   try {
+    // Gate everything behind Basic Auth when a password is configured.
+    if (!authOk(req)) {
+      res.writeHead(401, {
+        'WWW-Authenticate': 'Basic realm="Sports Trading App", charset="UTF-8"',
+        'Content-Type': 'text/plain',
+      });
+      return res.end('Authentication required.');
+    }
     const url = new URL(req.url, `http://${req.headers.host}`);
     const key = `${req.method} ${url.pathname}`;
 
@@ -796,5 +827,6 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   const p = kalshiProvider();
   const live = p.isConfigured ? `🟢 LIVE ready (${liveBaseLabel(p.baseUrl)}, read-only)` : '⚪ live not configured';
-  console.log(`Sports Trading App running at http://localhost:${PORT}  —  ${live}`);
+  const auth = AUTH_ENABLED ? `🔒 password-protected (user "${AUTH_USER}")` : '🔓 no auth (set AUTH_PASS before exposing publicly)';
+  console.log(`Sports Trading App running at http://localhost:${PORT}  —  ${live}  —  ${auth}`);
 });
