@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
-import { signKalshi, KalshiMarketProvider, dollarsToCents, normalizeMarket, mlbTickerDate, mlbTickerGameNumber } from '../src/data/kalshiMarketProvider.js';
+import { signKalshi, KalshiMarketProvider, dollarsToCents, normalizeMarket, mlbTickerDate, mlbTickerGameNumber, buildOrderPayload } from '../src/data/kalshiMarketProvider.js';
 
 const pssVerify = (publicKey, msg, sigB64) =>
   crypto.verify('sha256', Buffer.from(msg), {
@@ -79,6 +79,43 @@ test('normalizeMarket reads *_dollars fields into cents and picks a sane price',
   assert.equal(m.midCents, 47);
   assert.equal(m.priceCents, 47); // prefers last trade
   assert.equal(m.hasLiquidity, true);
+});
+
+test('buildOrderPayload shapes a YES limit buy on the correct side', () => {
+  const p = buildOrderPayload({ ticker: 'KXMLBGAME-X-LAD', side: 'yes', action: 'buy', count: 3, priceCents: 62, clientOrderId: 'coid-1' });
+  assert.deepEqual(p, {
+    ticker: 'KXMLBGAME-X-LAD', client_order_id: 'coid-1',
+    side: 'yes', action: 'buy', count: 3, type: 'limit', yes_price: 62,
+  });
+});
+
+test('buildOrderPayload puts a NO-side limit price on no_price', () => {
+  const p = buildOrderPayload({ ticker: 'T', side: 'no', action: 'buy', count: 1, priceCents: 40, clientOrderId: 'c' });
+  assert.equal(p.no_price, 40);
+  assert.equal(p.yes_price, undefined);
+});
+
+test('buildOrderPayload: a market order carries no price, and a client id is auto-generated', () => {
+  const p = buildOrderPayload({ ticker: 'T', action: 'sell', count: 2, type: 'market' });
+  assert.equal(p.type, 'market');
+  assert.equal(p.action, 'sell');
+  assert.equal('yes_price' in p, false);
+  assert.equal('no_price' in p, false);
+  assert.ok(typeof p.client_order_id === 'string' && p.client_order_id.length > 0);
+});
+
+test('buildOrderPayload rejects a missing ticker and a sub-1 count', () => {
+  assert.throws(() => buildOrderPayload({ count: 1, priceCents: 50 }), /ticker/);
+  assert.throws(() => buildOrderPayload({ ticker: 'T', count: 0, priceCents: 50 }), /count/);
+  assert.throws(() => buildOrderPayload({ ticker: 'T', count: -3, priceCents: 50 }), /count/);
+  assert.throws(() => buildOrderPayload({ ticker: 'T', priceCents: 50 }), /count/); // undefined count
+});
+
+test('buildOrderPayload enforces a 1..99 cent limit price', () => {
+  assert.throws(() => buildOrderPayload({ ticker: 'T', count: 1, priceCents: 0 }), /price/);
+  assert.throws(() => buildOrderPayload({ ticker: 'T', count: 1, priceCents: 100 }), /price/);
+  assert.doesNotThrow(() => buildOrderPayload({ ticker: 'T', count: 1, priceCents: 1 }));
+  assert.doesNotThrow(() => buildOrderPayload({ ticker: 'T', count: 1, priceCents: 99 }));
 });
 
 test('normalizeMarket treats 0/100 placeholders as absent (no invented price)', () => {

@@ -1,7 +1,10 @@
-// kalshiMarketProvider.js — LIVE Kalshi data source (read-only).
+// kalshiMarketProvider.js — LIVE Kalshi data source (reads) + gated trading (writes).
 //
-// Implements Kalshi's RSA-PSS request signing and read-only market fetches. It stays
-// NOT VERIFIED until credentials are provided; it never invents a price.
+// Implements Kalshi's RSA-PSS request signing. Market/price fetches are read-only and stay
+// NOT VERIFIED until credentials are provided; it never invents a price. The portfolio
+// methods at the bottom (createOrder/cancelOrder/getBalance/…) are the ONLY calls that can
+// move money — the server keeps them behind a hard env gate + size caps + confirmation, so
+// they never fire from a read/price path.
 //
 // Auth (confirmed against Kalshi's API docs):
 //   - Sign the string  `${timestampMs}${METHOD}${path}`  where path is the URL path
@@ -116,6 +119,36 @@ export function signKalshi(privateKeyPem, timestampMs, method, path) {
     .toString('base64');
 }
 
+/**
+ * Build a Kalshi order request body from plain inputs. Pure + validated so it can be unit
+ * tested without hitting the network. Kalshi wants: side yes|no, action buy|sell, an integer
+ * count >= 1, and for a limit order a 1..99¢ price on the matching side (yes_price/no_price).
+ * A market order carries no price. A client_order_id makes the write idempotent (a retry or
+ * double-click with the same id won't place a second order).
+ */
+export function buildOrderPayload({ ticker, side = 'yes', action = 'buy', count, priceCents, type = 'limit', clientOrderId } = {}) {
+  if (!ticker || typeof ticker !== 'string') throw new Error('order needs a ticker');
+  const s = side === 'no' ? 'no' : 'yes';
+  const a = action === 'sell' ? 'sell' : 'buy';
+  const n = Math.floor(Number(count));
+  if (!Number.isFinite(n) || n < 1) throw new Error('order count must be an integer >= 1');
+  const t = type === 'market' ? 'market' : 'limit';
+  const payload = {
+    ticker,
+    client_order_id: clientOrderId || crypto.randomUUID(),
+    side: s,
+    action: a,
+    count: n,
+    type: t,
+  };
+  if (t === 'limit') {
+    const p = Math.round(Number(priceCents));
+    if (!Number.isFinite(p) || p < 1 || p > 99) throw new Error('limit price must be 1..99 cents');
+    if (s === 'yes') payload.yes_price = p; else payload.no_price = p;
+  }
+  return payload;
+}
+
 function loadPrivateKey({ privateKeyPem, privateKeyPath }) {
   if (privateKeyPem) return privateKeyPem;
   const p = privateKeyPath ?? process.env.KALSHI_PRIVATE_KEY_PATH;
@@ -153,8 +186,9 @@ export class KalshiMarketProvider extends MarketProvider {
     if (!this.isConfigured) throw new Error(NOT_CONFIGURED);
   }
 
-  /** Signed request to the Kalshi REST API. Returns parsed JSON. */
-  async request(method, endpoint, { query } = {}) {
+  /** Signed request to the Kalshi REST API. Returns parsed JSON. A `body` (object) is sent
+   *  as JSON for writes (POST/DELETE). Reads (GET) pass `query` instead. */
+  async request(method, endpoint, { query, body } = {}) {
     this.assertConfigured();
     const url = new URL(this.baseUrl + endpoint);
     if (query) for (const [k, v] of Object.entries(query)) if (v != null) url.searchParams.set(k, v);
@@ -168,6 +202,7 @@ export class KalshiMarketProvider extends MarketProvider {
         'KALSHI-ACCESS-SIGNATURE': signature,
         'Content-Type': 'application/json',
       },
+      body: body != null ? JSON.stringify(body) : undefined,
     });
     const dateHeader = res.headers.get('date');
     if (dateHeader) { const t = Date.parse(dateHeader); if (!Number.isNaN(t)) this.lastServerTimeMs = t; }
@@ -241,6 +276,35 @@ export class KalshiMarketProvider extends MarketProvider {
     // Soonest games first.
     games.sort((a, b) => (Date.parse(a.occurrenceTime || 0) || 0) - (Date.parse(b.occurrenceTime || 0) || 0));
     return games;
+  }
+
+  // ---- Trading (portfolio) — WRITES to the account -------------------------
+  // These are the only methods that can move money. The server keeps them behind a
+  // hard env gate (KALSHI_TRADING_ARMED) + size caps + explicit confirmation, so nothing
+  // here fires from the read-only board/price paths.
+
+  /** Account cash balance (proves the portfolio API auth works; read-only). */
+  getBalance() {
+    return this.request('GET', '/portfolio/balance');
+  }
+
+  /** Your resting orders and/or positions (read-only). */
+  getOrders({ status, ticker } = {}) {
+    return this.request('GET', '/portfolio/orders', { query: { status, ticker } });
+  }
+  getPositions({ ticker } = {}) {
+    return this.request('GET', '/portfolio/positions', { query: { ticker } });
+  }
+
+  /** Place an order. WRITE — actually buys/sells on the account. `order` is validated and
+   *  shaped by buildOrderPayload. Returns Kalshi's order response (id, status, fills). */
+  createOrder(order) {
+    return this.request('POST', '/portfolio/orders', { body: buildOrderPayload(order) });
+  }
+
+  /** Cancel a resting order by id. WRITE. */
+  cancelOrder(orderId) {
+    return this.request('DELETE', `/portfolio/orders/${encodeURIComponent(orderId)}`);
   }
 
   #cache(market) {

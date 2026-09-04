@@ -111,6 +111,37 @@ function kalshiProvider() {
   if (!kalshi) kalshi = new KalshiMarketProvider();
   return kalshi;
 }
+
+// ---- LIVE TRADING (real orders on Kalshi) — HARD-GATED, OFF by default ------
+// The ONLY path in the app that can move money. It stays fully disabled unless the operator
+// sets KALSHI_TRADING_ARMED=true in the environment; even then every order must pass a size
+// cap AND carry an explicit confirm:true. The read-only board/price/sim paths never touch it.
+// Extra guard: refuse to arm against PRODUCTION unless KALSHI_TRADING_ALLOW_PROD=true, so the
+// default armed target is Kalshi's DEMO exchange (play money) while we build and test.
+const TRADING_ARMED = String(process.env.KALSHI_TRADING_ARMED || '').toLowerCase() === 'true';
+const TRADING_ALLOW_PROD = String(process.env.KALSHI_TRADING_ALLOW_PROD || '').toLowerCase() === 'true';
+const TRADING_MAX_CONTRACTS = Math.max(1, parseInt(process.env.KALSHI_TRADING_MAX_CONTRACTS || '10', 10) || 10);
+const TRADING_MAX_ORDER_CENTS = Math.max(1, Math.round((parseFloat(process.env.KALSHI_TRADING_MAX_ORDER_DOLLARS || '25') || 25) * 100));
+const isProdBase = (url) => String(url || '').includes('api.elections.kalshi.com');
+// True only when trading is armed AND (target is demo, or prod is explicitly allowed).
+function tradingEnabled() {
+  if (!TRADING_ARMED) return false;
+  if (isProdBase(kalshiProvider().baseUrl) && !TRADING_ALLOW_PROD) return false;
+  return kalshiProvider().isConfigured;
+}
+function tradingBlockedReason() {
+  if (!TRADING_ARMED) return 'Trading is disarmed. Set KALSHI_TRADING_ARMED=true to enable order execution.';
+  if (!kalshiProvider().isConfigured) return 'Kalshi credentials are not configured.';
+  if (isProdBase(kalshiProvider().baseUrl) && !TRADING_ALLOW_PROD) return 'Armed, but target is PRODUCTION (real money). Set KALSHI_TRADING_ALLOW_PROD=true to allow live-money orders, or point KALSHI_BASE_URL at the demo exchange.';
+  return null;
+}
+// Kalshi returns balance as integer cents (`balance`) and/or a dollar string; normalize.
+function readBalanceCents(b) {
+  if (!b) return null;
+  if (b.balance_dollars != null) { const n = Number(b.balance_dollars); return Number.isFinite(n) ? Math.round(n * 100) : null; }
+  if (typeof b.balance === 'number') return b.balance;
+  return null;
+}
 const LIVE_TTL_MS = 8000;
 const liveCaches = { mlb: { at: 0, board: [] }, nfl: { at: 0, board: [] }, nhl: { at: 0, board: [] } }; // per-sport board cache
 
@@ -719,6 +750,77 @@ const api = {
     };
   },
 
+  // ---- LIVE TRADING (real orders) — every route below is hard-gated ---------
+  // Status for the UI's 💵 trading toggle: is execution armed, against which exchange,
+  // with what caps, and the account balance (balance is read-only, shown whenever the
+  // key is configured). No order is placed here.
+  'GET /api/trade/status': async () => {
+    const p = kalshiProvider();
+    const enabled = tradingEnabled();
+    let balanceCents = null, balanceErr = null;
+    if (p.isConfigured) {
+      try { balanceCents = readBalanceCents(await p.getBalance()); }
+      catch (e) { balanceErr = e.message; }
+    }
+    return {
+      trade: {
+        armed: TRADING_ARMED,
+        enabled,                                   // armed AND allowed against this exchange
+        configured: p.isConfigured,
+        base: liveBaseLabel(p.baseUrl),
+        isProd: isProdBase(p.baseUrl),
+        allowProd: TRADING_ALLOW_PROD,
+        maxContracts: TRADING_MAX_CONTRACTS,
+        maxOrderCents: TRADING_MAX_ORDER_CENTS,
+        blockedReason: tradingBlockedReason(),     // null when enabled
+        balanceCents, balanceErr,
+      },
+    };
+  },
+
+  // Place a REAL order on Kalshi. Refuses unless trading is enabled, the request carries
+  // confirm:true, and it passes the count + notional caps. This moves money.
+  'POST /api/trade/order': async (body) => {
+    if (!tradingEnabled()) throw new Error(`🚫 ${tradingBlockedReason()}`);
+    if (body.confirm !== true) throw new Error('Order not confirmed — resend with confirm:true.');
+    const count = Math.floor(Number(body.count));
+    const priceCents = Math.round(Number(body.priceCents));
+    if (!Number.isFinite(count) || count < 1) throw new Error('Order count must be an integer ≥ 1.');
+    if (count > TRADING_MAX_CONTRACTS) throw new Error(`Order of ${count} exceeds the cap of ${TRADING_MAX_CONTRACTS} contracts.`);
+    if (!Number.isFinite(priceCents) || priceCents < 1 || priceCents > 99) throw new Error('Limit price must be 1–99¢.');
+    const notionalCents = count * priceCents; // worst-case capital for a buy at the limit
+    if (notionalCents > TRADING_MAX_ORDER_CENTS) {
+      throw new Error(`Order (~$${(notionalCents / 100).toFixed(2)}) exceeds the per-order cap of $${(TRADING_MAX_ORDER_CENTS / 100).toFixed(2)}.`);
+    }
+    const order = {
+      ticker: String(body.ticker || ''),
+      side: body.side === 'no' ? 'no' : 'yes',
+      action: body.action === 'sell' ? 'sell' : 'buy',
+      count, priceCents, type: 'limit',
+      clientOrderId: body.clientOrderId || undefined,
+    };
+    const resp = await kalshiProvider().createOrder(order);
+    return { placed: order, notionalCents, response: resp };
+  },
+
+  // Your real resting orders + positions on Kalshi (read-only).
+  'GET /api/trade/positions': async () => {
+    if (!kalshiProvider().isConfigured) throw new Error('Kalshi credentials are not configured.');
+    const [orders, positions] = await Promise.all([
+      kalshiProvider().getOrders({ status: 'resting' }).catch(() => null),
+      kalshiProvider().getPositions().catch(() => null),
+    ]);
+    return { orders, positions };
+  },
+
+  // Cancel a resting order by id. Gated like order placement.
+  'POST /api/trade/cancel': async (body) => {
+    if (!tradingEnabled()) throw new Error(`🚫 ${tradingBlockedReason()}`);
+    if (!body.orderId) throw new Error('cancel needs an orderId.');
+    const resp = await kalshiProvider().cancelOrder(String(body.orderId));
+    return { canceled: body.orderId, response: resp };
+  },
+
   'POST /api/replacements': (body, mode) => {
     const bk = book(mode);
     const board = addCombos((body.board ?? []).map((c, i) => resolveCandidate(c, i, bk.engine)));
@@ -868,7 +970,12 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   const p = kalshiProvider();
-  const live = p.isConfigured ? `🟢 LIVE ready (${liveBaseLabel(p.baseUrl)}, read-only)` : '⚪ live not configured';
+  const readWrite = tradingEnabled() ? 'read+WRITE' : 'read-only';
+  const live = p.isConfigured ? `🟢 LIVE ready (${liveBaseLabel(p.baseUrl)}, ${readWrite})` : '⚪ live not configured';
   const auth = AUTH_ENABLED ? `🔒 password-protected (user "${AUTH_USER}")` : '🔓 no auth (set AUTH_PASS before exposing publicly)';
+  const trade = tradingEnabled()
+    ? `💵 TRADING ARMED on ${liveBaseLabel(p.baseUrl)} — orders WILL execute (max ${TRADING_MAX_CONTRACTS} ctr / $${(TRADING_MAX_ORDER_CENTS / 100).toFixed(2)} per order)`
+    : `🔒 trading disarmed (${tradingBlockedReason()})`;
   console.log(`Sports Trading App running at http://localhost:${PORT}  —  ${live}  —  ${auth}`);
+  console.log(`   ${trade}`);
 });

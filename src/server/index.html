@@ -166,6 +166,15 @@
   🔴 <b>Live Play</b> — no live market/game feed is connected yet. This mode will show real Kalshi prices once set up (see <a href="/spec">Spec</a> and KALSHI_SETUP.md). The simulation tools below belong to Simulation mode.
 </div>
 
+<!-- 💵 LIVE TRADING status — real order execution. Shown only in Live mode. Arming is
+     server-env-gated (KALSHI_TRADING_ARMED); this chip reflects that state, it can't override it. -->
+<div id="tradeChip" class="live-only" data-live-display="flex" style="display:none;align-items:center;gap:10px;margin:10px 20px 0;padding:9px 14px;border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:8px;background:#fbfbfd;font-size:13px">
+  <span id="tradeChipText">💵 checking live-trading status…</span>
+  <label id="tradeArmWrap" style="margin-left:auto;display:none;align-items:center;gap:6px;font-weight:700;cursor:pointer">
+    <input type="checkbox" id="tradeArmCb" style="width:auto" onchange="toggleTradeArm()"> 💵 arm real orders
+  </label>
+</div>
+
 <main>
   <!-- ① PRE-GAME -->
   <section class="area pre">
@@ -355,7 +364,7 @@ async function applyMode() {
     const st = (await call('/api/live/status')).live;
     if (st.configured) {
       banner.style.borderColor = 'var(--good)'; banner.style.borderLeftColor = 'var(--good)'; banner.style.background = '#f0fbf3';
-      banner.innerHTML = `🟢 <b>Live Play</b> — real Kalshi prices (<b>${st.base}</b>, <b>read-only</b>). The app never places orders; you trade manually on Kalshi. Hit “📋 Rank live games”.`;
+      banner.innerHTML = `🟢 <b>Live Play</b> — real Kalshi prices (<b>${st.base}</b>). Live-trading status is in the 💵 bar below. Hit “📋 Rank live games”.`;
     } else {
       banner.style.borderColor = 'var(--bad)'; banner.style.borderLeftColor = 'var(--bad)'; banner.style.background = '#fff5f5';
       banner.innerHTML = `🔴 <b>Live Play</b> — ${st.note}`;
@@ -364,6 +373,59 @@ async function applyMode() {
     banner.style.borderColor = 'var(--bad)'; banner.style.borderLeftColor = 'var(--bad)'; banner.style.background = '#fff5f5';
     banner.innerHTML = `🔴 <b>Live Play</b> — could not reach live status: ${e.message}`;
   }
+  refreshTradeStatus().catch(() => {});
+}
+
+// ---- 💵 LIVE TRADING status chip ------------------------------------------
+// Real order execution is gated on the SERVER by env (KALSHI_TRADING_ARMED + demo/prod
+// rules). This chip mirrors that state; the client "arm" switch only decides whether YOUR
+// Open/Sell actions route to real orders, and it's meaningless (hidden) unless the server
+// says trading is enabled. Client arming defaults OFF every session for safety.
+let tradeStatus = null;
+let tradeArmed = false; // client-side: do MY actions place real orders? (only if server-enabled)
+const money = (c) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`);
+async function refreshTradeStatus() {
+  const chip = $('tradeChip'), txt = $('tradeChipText'), armWrap = $('tradeArmWrap'), armCb = $('tradeArmCb');
+  if (!chip || !txt) return;
+  let t;
+  try { t = (await call('/api/trade/status')).trade; }
+  catch (e) { txt.textContent = `💵 live-trading status unavailable: ${e.message}`; return; }
+  tradeStatus = t;
+  const setBorder = (c) => { chip.style.borderLeftColor = c; };
+  if (!t.configured) {
+    setBorder('var(--muted)'); armWrap.style.display = 'none'; tradeArmed = false;
+    txt.innerHTML = '💵 <b>Live trading</b> — Kalshi key not configured.';
+    return;
+  }
+  if (!t.enabled) {
+    // Server keeps execution disarmed — read-only. Show why + how to enable.
+    setBorder('var(--muted)'); armWrap.style.display = 'none'; tradeArmed = false;
+    txt.innerHTML = `💵 <b>Live trading: OFF</b> <span class="muted">(read-only on ${t.base}${t.balanceCents != null ? ' · balance ' + money(t.balanceCents) : ''})</span> — ${t.blockedReason}`;
+    return;
+  }
+  // Server-enabled: real orders are possible. Reveal the client arm switch (default OFF).
+  armWrap.style.display = 'flex';
+  armCb.checked = tradeArmed;
+  if (tradeArmed) {
+    setBorder('var(--bad)');
+    chip.style.background = '#fff5f5';
+    txt.innerHTML = `💵 <b style="color:var(--bad)">LIVE TRADING ARMED</b> on <b>${t.base}</b> — your Open/Sell will place <b>real orders</b>. Balance <b>${money(t.balanceCents)}</b> · caps ${t.maxContracts} ctr / ${money(t.maxOrderCents)} per order.`;
+  } else {
+    setBorder('var(--warn, #b8860b)');
+    chip.style.background = '#fffdf5';
+    txt.innerHTML = `💵 <b>Live trading available</b> on <b>${t.base}</b> (balance ${money(t.balanceCents)}) — currently <b>disarmed</b>. Tick the box to let your actions place real orders.`;
+  }
+}
+function toggleTradeArm() {
+  const armCb = $('tradeArmCb');
+  if (!tradeStatus || !tradeStatus.enabled) { if (armCb) armCb.checked = false; tradeArmed = false; return; }
+  if (armCb && armCb.checked) {
+    const ok = confirm(`Arm REAL order execution on ${tradeStatus.base}?\n\nWhile armed, your Open/Sell actions place real orders on Kalshi (each still asks you to confirm).\nCaps: ${tradeStatus.maxContracts} contracts / ${money(tradeStatus.maxOrderCents)} per order.`);
+    tradeArmed = ok; armCb.checked = ok;
+  } else {
+    tradeArmed = false;
+  }
+  refreshTradeStatus().catch(() => {});
 }
 function setMode(m) {
   appMode = m === 'live' ? 'live' : 'sim';
