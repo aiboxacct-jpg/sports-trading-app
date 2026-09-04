@@ -261,12 +261,14 @@ const books = {
   live: { engine: null, history: [], missed: [] },
 };
 const book = (mode) => books[mode === 'live' ? 'live' : 'sim'];
-let liveBoard;    // 🔴 simulated daily slate (SIMULATION mode only)
-
-// MLB inning label for a live-board step (0..17 = Top 1 .. Bot 9).
-function liveInningLabel(step) {
-  const s = ((step % 18) + 18) % 18;
-  return `${s % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(s / 2) + 1}`;
+let liveBoards = {};    // 🔴 simulated daily slate per sport (SIMULATION mode only): {mlb,nfl,nhl}
+// Lazily build (and cache) the sim slate for a sport, so switching leagues just works.
+function simBoard(sport) {
+  sport = simSport(sport);
+  if (!Array.isArray(liveBoards[sport]) || !liveBoards[sport].length) {
+    liveBoards[sport] = generateLiveBoard(new Set(), sport);
+  }
+  return liveBoards[sport];
 }
 
 const MLB_TEAMS = [
@@ -275,12 +277,35 @@ const MLB_TEAMS = [
   'Phillies', 'Mets', 'Marlins', 'Nationals', 'Brewers', 'Cubs', 'Cardinals', 'Reds',
   'Pirates', 'Dodgers', 'Padres', 'Giants', 'Diamondbacks', 'Rockies',
 ];
+const NFL_TEAMS = [
+  'Chiefs', 'Bills', 'Bengals', 'Ravens', 'Dolphins', 'Jets', 'Patriots', 'Steelers',
+  'Browns', 'Texans', 'Colts', 'Jaguars', 'Titans', 'Broncos', 'Chargers', 'Raiders',
+  'Cowboys', 'Eagles', 'Commanders', 'Giants', 'Packers', 'Vikings', 'Lions', 'Bears',
+  'Buccaneers', 'Saints', 'Falcons', 'Panthers', '49ers', 'Seahawks', 'Rams', 'Cardinals',
+];
+const NHL_TEAMS = [
+  'Bruins', 'Sabres', 'Red Wings', 'Panthers', 'Canadiens', 'Senators', 'Lightning',
+  'Maple Leafs', 'Hurricanes', 'Blue Jackets', 'Devils', 'Islanders', 'Rangers', 'Flyers',
+  'Penguins', 'Capitals', 'Blackhawks', 'Avalanche', 'Stars', 'Wild', 'Predators', 'Blues',
+  'Jets', 'Utah', 'Ducks', 'Kings', 'Sharks', 'Kraken', 'Flames', 'Oilers', 'Canucks', 'Golden Knights',
+];
+
+// Per-sport SIMULATION clock: how many steps a regulation game runs, and the label per
+// step. MLB = 18 half-innings, NFL = 12 (4 quarters × 3), NHL = 9 (3 periods × 3).
+const SIM_FORMATS = {
+  mlb: { steps: 18, teams: MLB_TEAMS, label: (s) => { const x = ((s % 18) + 18) % 18; return `${x % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(x / 2) + 1}`; } },
+  nfl: { steps: 12, teams: NFL_TEAMS, label: (s) => { const x = ((s % 12) + 12) % 12; return `Q${Math.floor(x / 3) + 1} ${['15:00', '10:00', '5:00'][x % 3]}`; } },
+  nhl: { steps: 9,  teams: NHL_TEAMS, label: (s) => { const x = ((s % 9) + 9) % 9;   return `P${Math.floor(x / 3) + 1} ${['20:00', '13:20', '6:40'][x % 3]}`; } },
+};
+const simSport = (s) => (SIM_FORMATS[s] ? s : 'mlb');
 
 // A random "daily slate" of in-progress games — varying count, matchups, innings and
-// prices — so each day feels different. Simulated until a real MLB feed is wired in.
-// `exclude` keeps teams you already hold out of the slate, so no team appears twice.
-function generateLiveBoard(exclude = new Set()) {
-  const teams = MLB_TEAMS.filter((t) => !exclude.has(t));
+// prices — so each day feels different. Simulated (paper) games, sport-aware: MLB innings,
+// NFL quarters, NHL periods. `exclude` keeps teams you already hold out of the slate.
+function generateLiveBoard(exclude = new Set(), sport = 'mlb') {
+  sport = simSport(sport);
+  const fmt = SIM_FORMATS[sport];
+  const teams = fmt.teams.filter((t) => !exclude.has(t));
   for (let i = teams.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [teams[i], teams[j]] = [teams[j], teams[i]];
@@ -290,16 +315,17 @@ function generateLiveBoard(exclude = new Set()) {
   for (let i = 0; i < games && teams.length >= 2; i++) {
     const team = teams.pop();
     const opponent = teams.pop();
-    const step = Math.floor(Math.random() * 18);
+    const step = Math.floor(Math.random() * fmt.steps);
     const priceCents = 20 + Math.floor(Math.random() * 61); // 20..80
     board.push({
-      id: `lv-${i}-${team}`,
+      id: `lv-${sport}-${i}-${team}`,
       team,
       opponent,
-      ticker: `LIVE-${team.toUpperCase().replace(/\s+/g, '')}`,
+      sport, // each sim position carries its sport, like the real live board
+      ticker: `LIVE-${sport.toUpperCase()}-${team.toUpperCase().replace(/\s+/g, '')}`,
       priceCents,
       step,
-      gameState: liveInningLabel(step),
+      gameState: fmt.label(step),
       status: 'open',
     });
   }
@@ -317,21 +343,28 @@ function loadBook(s) {
 }
 const bankedInfo = (bk) => ({ cents: bk.bankedCents || 0, rounds: bk.roundsWon || 0 });
 const saved = loadState(STATE_FILE);
+// Restore per-sport sim boards. Newer saves hold `liveBoards` {mlb,nfl,nhl}; older ones
+// hold a single MLB `liveBoard` array — seed mlb from it. Missing sports build lazily.
+function restoreBoards(s) {
+  if (s && s.liveBoards && typeof s.liveBoards === 'object') return { ...s.liveBoards };
+  if (s && Array.isArray(s.liveBoard) && s.liveBoard.length) return { mlb: s.liveBoard };
+  return {};
+}
 if (saved && saved.version === 2) {
   books.sim = loadBook(saved.sim);
   books.live = loadBook(saved.live);
-  liveBoard = Array.isArray(saved.liveBoard) && saved.liveBoard.length ? saved.liveBoard : generateLiveBoard();
+  liveBoards = restoreBoards(saved);
 } else if (saved && saved.engine) {
   // Migrate v1 (single shared ledger). That ledger was used for LIVE play, so it becomes
   // the LIVE book; SIMULATION starts clean so the two are finally separate.
   books.live = loadBook({ engine: saved.engine, history: saved.simHistory, missed: saved.missed });
   books.sim = loadBook(null);
-  liveBoard = Array.isArray(saved.liveBoard) && saved.liveBoard.length ? saved.liveBoard : generateLiveBoard();
+  liveBoards = restoreBoards(saved);
   console.log('↺ migrated v1 ledger -> LIVE book; SIMULATION reset clean (separation fix)');
 } else {
   books.sim = loadBook(null);
   books.live = loadBook(null);
-  liveBoard = generateLiveBoard();
+  liveBoards = {};
 }
 console.log(`↺ sim: ${books.sim.engine.positions.length} pos / ${books.sim.history.length} decisions · live: ${books.live.engine.positions.length} pos / ${books.live.history.length} decisions`);
 
@@ -346,9 +379,9 @@ function heldTeams() {
   return s;
 }
 
-// Random-walk the live prices so the board feels live between refreshes.
-function driftLiveBoard() {
-  for (const g of liveBoard) {
+// Random-walk one sport's live prices so the board feels live between refreshes.
+function driftLiveBoard(sport) {
+  for (const g of simBoard(sport)) {
     g.priceCents = Math.max(1, Math.min(99, g.priceCents + Math.round((Math.random() * 2 - 1) * 4)));
   }
 }
@@ -358,7 +391,7 @@ function persist() {
     version: 2,
     sim: { engine: books.sim.engine.toState(), history: books.sim.history, missed: books.sim.missed, bankedCents: books.sim.bankedCents, roundsWon: books.sim.roundsWon },
     live: { engine: books.live.engine.toState(), history: books.live.history, missed: books.live.missed, bankedCents: books.live.bankedCents, roundsWon: books.live.roundsWon },
-    liveBoard,
+    liveBoards,
   });
 }
 
@@ -503,7 +536,7 @@ const api = {
     bk.missed.length = 0;
     bk.bankedCents = 0;
     bk.roundsWon = 0;
-    if (mode !== 'live') liveBoard = generateLiveBoard();
+    if (mode !== 'live') liveBoards = {}; // fresh sim slates (rebuilt lazily per sport)
     return { snapshot: bk.engine.snapshot(), banked: bankedInfo(bk) };
   },
 
@@ -558,32 +591,35 @@ const api = {
     return { pregame: buildPreGameReport(bk.engine.snapshot(), board, { feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), mode: reportMode, ...sizingOpts(body) }) };
   },
 
-  // The SIMULATION daily slate (always the sim book).
+  // The SIMULATION daily slate for the chosen sport (always the sim book).
   'POST /api/livegame': (body) => ({
-    livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }),
+    livegame: buildPreGameReport(books.sim.engine.snapshot(), simBoard(body.sport), { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }),
   }),
 
   'POST /api/livegame/refresh': (body) => {
-    driftLiveBoard();
-    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
+    driftLiveBoard(body.sport);
+    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), simBoard(body.sport), { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
   },
 
-  // Pull a fresh random daily slate of live games.
+  // Pull a fresh random daily slate of live games for the chosen sport.
   'POST /api/livegame/new': (body) => {
-    liveBoard = generateLiveBoard(heldTeams());
-    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
+    const sport = simSport(body.sport);
+    liveBoards[sport] = generateLiveBoard(heldTeams(), sport);
+    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), simBoard(sport), { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
   },
 
-  // Advance the live board one clock step: drift prices + move each game's inning.
-  // A game that finishes regulation restarts as a fresh matchup so the board stays live.
+  // Advance one sport's board a clock step: drift prices + move each game's inning/quarter/
+  // period. A game that finishes regulation restarts as a fresh matchup so the board stays live.
   'POST /api/livegame/tick': (body) => {
-    for (const g of liveBoard) {
+    const sport = simSport(body.sport);
+    const fmt = SIM_FORMATS[sport];
+    for (const g of simBoard(sport)) {
       g.priceCents = Math.max(1, Math.min(99, g.priceCents + Math.round((Math.random() * 2 - 1) * 4)));
       g.step = (g.step ?? 0) + 1;
-      if (g.step > 17) { g.step = 0; g.priceCents = 40 + Math.floor(Math.random() * 21); } // new game
-      g.gameState = liveInningLabel(g.step);
+      if (g.step >= fmt.steps) { g.step = 0; g.priceCents = 40 + Math.floor(Math.random() * 21); } // new game
+      g.gameState = fmt.label(g.step);
     }
-    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), liveBoard, { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
+    return { livegame: buildPreGameReport(books.sim.engine.snapshot(), simBoard(sport), { feeRate: books.sim.engine.feeRate, historical: historicalEngine(books.sim.history), ...sizingOpts(body) }) };
   },
 
   // ---- LIVE Kalshi board (real prices, read-only) -------------------------

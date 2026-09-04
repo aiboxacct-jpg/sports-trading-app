@@ -212,7 +212,7 @@
       <span class="tag">scan live games and jump in mid-game</span><span class="chev">▾</span></h2>
     <div class="body">
       <div class="row" style="margin-bottom:10px">
-        <div class="live-only" style="flex:0 0 auto;display:none"><label>Sport</label><select id="liveSportSel" onchange="setLiveSport(this.value)"><option value="mlb">⚾ MLB</option><option value="nfl">🏈 NFL</option><option value="nhl">🏒 NHL</option></select></div>
+        <div style="flex:0 0 auto"><label>Sport</label><select id="liveSportSel" onchange="setLiveSport(this.value)"><option value="mlb">⚾ MLB</option><option value="nfl">🏈 NFL</option><option value="nhl">🏒 NHL</option></select></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
@@ -248,9 +248,8 @@
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <div class="sim-only" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <b style="font-size:12px">Simulate game:</b>
-          <select id="sportSel" style="width:auto"><option value="MLB">MLB (9 innings)</option><option value="NHL">NHL (3 periods)</option></select>
           <select id="speedSel" style="width:auto" title="play speed" onchange="setSpeed()">
-            <optgroup label="Quick (delay per inning)">
+            <optgroup label="Quick (delay per step)">
               <option value="2000">Fast · 2s</option>
               <option value="3500" selected>Normal · 3.5s</option>
               <option value="6000">Slow · 6s</option>
@@ -270,7 +269,7 @@
         <span class="live-only muted" style="font-size:12px;display:none">🔴 Live mode — real games decide the outcome; use “🔄 Update (u)” or Auto-refresh above. (Simulation controls are in ⚪ Simulation mode.)</span>
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:auto"><input type="checkbox" id="autoLockCb" style="width:auto" onchange="toggleAutoLock()"> 🔒 Auto-lock at target</label>
       </div>
-      <div class="sim-only muted" style="font-size:12px;margin-top:2px">plays the full game clock; each step advances an inning/period and drifts prices</div>
+      <div class="sim-only muted" style="font-size:12px;margin-top:2px">plays the full game clock; each step advances an inning / quarter / period and drifts prices</div>
 
       <div style="margin-top:12px">
         <div style="font-weight:700;font-size:12px;color:var(--muted)">Your decision <span style="font-weight:400">(click a number)</span></div>
@@ -380,11 +379,15 @@ function setMode(m) {
   refresh().catch(() => {});
   livegame().catch(() => {});
 }
-// Switch the live sport (⚾ MLB / 🏈 NFL): remember it and reload the board + positions.
+// Switch league (⚾ MLB / 🏈 NFL / 🏒 NHL) — works in BOTH sim and live. Remembers the
+// choice, reloads that sport's board + positions, and (in sim) resets the game clock to
+// the new format, re-pacing a running Play loop since step counts differ per sport.
 function setLiveSport(s) {
   liveSport = ['mlb', 'nfl', 'nhl'].includes(s) ? s : 'mlb';
   localStorage.setItem('liveSport', liveSport);
   const sel = $('liveSportSel'); if (sel) sel.value = liveSport;
+  gameStep = 0; setGameClock('');              // fresh clock for the new format
+  if (playTimer) { stopPlay(); playPause(); }  // re-pace for the new step count
   livegame().catch(() => {});
   refresh().catch(() => {});
 }
@@ -594,11 +597,14 @@ async function enterLivePick(g) {
 // 70¢ market wins ~70% of the time). Auto-lock can still bank the target mid-game.
 let playTimer = null;
 let gameStep = 0;
+// Sim clock, keyed by the unified league toggle (liveSport). MLB = 18 half-innings,
+// NFL = 12 (4 quarters × 3), NHL = 9 (3 periods × 3).
 const GAME_FORMATS = {
-  MLB: { totalSteps: 18, label: (s) => `${s % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(s / 2) + 1}` },
-  NHL: { totalSteps: 9,  label: (s) => `P${Math.floor(s / 3) + 1} ${['20:00', '13:20', '6:40'][s % 3]}` },
+  mlb: { totalSteps: 18, label: (s) => `${s % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(s / 2) + 1}` },
+  nfl: { totalSteps: 12, label: (s) => `Q${Math.floor(s / 3) + 1} ${['15:00', '10:00', '5:00'][s % 3]}` },
+  nhl: { totalSteps: 9,  label: (s) => `P${Math.floor(s / 3) + 1} ${['20:00', '13:20', '6:40'][s % 3]}` },
 };
-function currentSport() { const el = $('sportSel'); return (el && GAME_FORMATS[el.value]) ? el.value : 'MLB'; }
+function currentSport() { return GAME_FORMATS[liveSport] ? liveSport : 'mlb'; }
 function setGameClock(txt) { const el = $('gameClock'); if (el) el.textContent = txt ? `🕐 ${txt}` : ''; }
 
 async function gameTick() {
