@@ -427,6 +427,33 @@ function toggleTradeArm() {
   }
   refreshTradeStatus().catch(() => {});
 }
+// Is real-order execution active right now (server-enabled AND client-armed AND in live mode)?
+function realTradingOn() { return isLive() && tradeArmed && tradeStatus && tradeStatus.enabled; }
+// A real Kalshi ticker (not a sim placeholder) is required to trade.
+function isRealTicker(t) { return typeof t === 'string' && t.length > 0 && !t.startsWith('LIVE-'); }
+// Turn a stake ($) + price (¢) into a contract count, clamped to both caps.
+function contractsFor(stakeDollars, priceCents) {
+  if (!priceCents || priceCents < 1) return 0;
+  const maxCtr = tradeStatus ? tradeStatus.maxContracts : 10;
+  const maxByDollar = Math.floor((tradeStatus ? tradeStatus.maxOrderCents : 2500) / priceCents);
+  return Math.max(1, Math.min(Math.floor((stakeDollars * 100) / priceCents), maxCtr, maxByDollar));
+}
+// How many contracts you really hold on Kalshi for a ticker (from /api/trade/positions).
+function realHeldCount(tp, ticker) {
+  const mps = (tp && tp.positions && tp.positions.market_positions) || [];
+  const m = mps.find((x) => x.ticker === ticker);
+  return m ? Math.abs(Number(m.position) || 0) : 0;
+}
+// Place ONE real order, gated behind an explicit confirm dialog showing the exact terms.
+// Returns the server response, or null if the user declined. Throws on a server error.
+async function placeRealOrder({ ticker, side = 'yes', action = 'buy', count, priceCents }, note = '') {
+  const base = tradeStatus ? tradeStatus.base : 'Kalshi';
+  const verb = action === 'buy' ? 'BUY' : 'SELL';
+  const est = money(count * priceCents);
+  const ok = confirm(`💵 REAL ORDER — ${base}\n\n${verb} ${count} contract(s) of\n${ticker}\nside ${side.toUpperCase()} · limit ${priceCents}¢ · ~${est}\n${note}\n\nThis places a real order on Kalshi. Proceed?`);
+  if (!ok) return null;
+  return call('/api/trade/order', { ticker, side, action, count, priceCents, confirm: true });
+}
 function setMode(m) {
   appMode = m === 'live' ? 'live' : 'sim';
   localStorage.setItem('appMode', appMode);
@@ -531,7 +558,7 @@ function renderSnapshot(snap) {
       <td>${fmt(p.currentValueCents)}</td>
       <td class="${cls(p.unrealizedPureProfitCents)}">${fmt(p.unrealizedPureProfitCents)}</td>
       <td>
-        <button class="sm" onclick="closePos('${p.id}','np-${p.id}')">Close</button>
+        <button class="sm" onclick="closePos('${p.id}','np-${p.id}','${String(p.ticker || '').replace(/'/g, "\\'")}','${String(p.team || '').replace(/'/g, "\\'")}')">Close</button>
         <button class="sm ghost" onclick="settle('${p.id}','win')">Win</button>
         <button class="sm ghost" onclick="settle('${p.id}','loss')">Loss</button></td></tr>`;
   }).join('') : '<tr><td colspan="8" class="muted">No open positions. Enter one in Pre-Game.</td></tr>';
@@ -1045,9 +1072,24 @@ async function setState(id) {
   try { await call('/api/gamestate', { id, gameState: $('gs-' + id).value }); await refresh(); }
   catch (e) { $('liveErr').textContent = e.message; }
 }
-async function closePos(id, inputId) {
-  try { await call('/api/close', { id, exitPriceCents: +$(inputId).value }); await refresh(); }
-  catch (e) { $('liveErr').textContent = e.message; }
+async function closePos(id, inputId, ticker, team) {
+  try {
+    const price = +$(inputId).value;
+    // 💵 ARMED live trading: sell your real Kalshi contracts first (what you actually hold),
+    // then close the paper record. Disarmed/sim just closes the paper position.
+    if (realTradingOn() && isRealTicker(ticker)) {
+      let held = 0;
+      try { held = realHeldCount(await call('/api/trade/positions'), ticker); } catch { /* fall through */ }
+      if (held > 0) {
+        const r = await placeRealOrder({ ticker, side: 'yes', action: 'sell', count: held, priceCents: price }, `(closing ${team || ticker})`);
+        if (!r) { $('liveErr').textContent = 'Sell canceled — position left open.'; return; }
+        await refreshTradeStatus();
+      } else if (!confirm('No matching Kalshi position found to sell. Close the paper position only?')) {
+        return;
+      }
+    }
+    await call('/api/close', { id, exitPriceCents: price }); await refresh();
+  } catch (e) { $('liveErr').textContent = e.message; }
 }
 async function settle(id, outcome) {
   try { await call('/api/settle', { id, outcome }); await refresh(); }
@@ -1238,6 +1280,26 @@ async function openSelectedNow() {
   const picks = getSelectedPicks();
   if (!picks.length) { pickActionMsg('👆 Click a pick card to select it first (it turns blue), then Open selected now.'); return; }
   clearPickActionMsg();
+
+  // 💵 ARMED live trading: place a REAL buy order (one pick at a time for safety), then keep
+  // a paper record so the app still tracks it. Disarmed/sim falls through to the paper flow.
+  if (realTradingOn()) {
+    if (picks.length > 1) { pickActionMsg('💵 Real-order mode: select just ONE pick at a time.'); return; }
+    const p = picks[0];
+    if (!isRealTicker(p.ticker)) { pickActionMsg('This pick has no real Kalshi ticker — can’t place a real order.'); return; }
+    const count = contractsFor(p.stakeForTargetCents / 100, p.priceCents);
+    try {
+      const r = await placeRealOrder({ ticker: p.ticker, side: 'yes', action: 'buy', count, priceCents: p.priceCents }, `(${p.team} to win)`);
+      if (!r) { pickActionMsg('Order canceled — nothing placed.'); return; }
+      // Mirror it on paper (stake = the contracts we actually ordered) so tracking continues.
+      await call('/api/open', { team: p.team, opponent: p.opponent, ticker: p.ticker, kind: p.kind, priceCents: p.priceCents, stakeDollars: count * p.priceCents / 100, gameState: p.gameState || null });
+      clearPickSelection(); await refresh(); await refreshTradeStatus();
+      flashDecision(`💵 Real order placed: BUY ${count} × ${p.ticker} @ ${p.priceCents}¢ (also tracked on paper).`);
+      document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) { pickActionMsg('💵 Order failed: ' + e.message); }
+    return;
+  }
+
   const unaffordable = picks.filter((p) => !p.affordable).length;
   if (unaffordable && !confirm(`${unaffordable} selected pick(s) exceed your available cash. Open anyway?`)) return;
   try {
