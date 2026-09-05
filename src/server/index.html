@@ -1194,9 +1194,7 @@ function renderLiveGame(pg) {
     html += '<div style="font-weight:800;margin-bottom:6px">🔴 LIVE GAME BOARD <span class="muted" style="font-weight:500">— ⚪ simulation; prices drift on refresh, game states illustrative</span></div>';
   }
   html += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">' +
-    '<span class="muted" style="font-size:12px">click a game to select, then jump in</span>' +
-    '<button class="sm" onclick="openSelectedNow()">⚡ Open selected now</button>' +
-    '<button class="sm ghost" onclick="stageSelected()">⬇ Stage to step 2</button></div>';
+    '<span class="muted" style="font-size:12px">👆 click a game to open it — it drops straight into Live Data Update below (use ⬇ Stage on a card to tweak stake first)</span></div>';
   if (!pg.actionRanking.length) {
     html += live
       ? `<p class="muted">✅ No ${liveSport.toUpperCase()} games on the board right now — today's are final or none are listed yet. They appear here on game days.</p>`
@@ -1212,12 +1210,15 @@ function renderLiveGame(pg) {
     if (it.live) stateChip = `<span class="live-badge">🔴 ${it.gameState || 'LIVE'}</span>`;
     else if (it.gameState && /Final/.test(it.gameState)) stateChip = `<span class="upcoming">🏁 ${it.gameState}</span>`;
     else if (startTxt) stateChip = `<span class="upcoming">⏰ ${startTxt}</span>`;
-    html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="togglePick(this)">
+    html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="openLiveCard(this)" title="Click to open this position">
         <div>${badge}<span class="medal">${it.medal}</span> ${pickText(it)} ${stateChip}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         <div class="why">${it.why}</div>
         ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}
-        <div style="font-size:12px">→ ${it.action}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="font-size:12px">→ ${it.action}</span>
+          <button class="sm ghost" style="font-size:11px" onclick="event.stopPropagation(); stageOne(${i}, 'live')">⬇ Stage</button>
+        </div>
     </div>`;
   });
   html += '</div>';
@@ -1275,45 +1276,68 @@ function stageSelected() {
   document.querySelector('.area.pre h2:nth-of-type(2)')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// Open ONE pick — a REAL Kalshi order when armed live-trading is on (mirrored on paper so
+// the app keeps tracking it), otherwise just a paper position. Returns true on success,
+// false if declined/blocked. Shared by the Live-Board one-click open and Open-selected.
+async function openOnePick(p) {
+  if (realTradingOn()) {
+    if (!isRealTicker(p.ticker)) { pickActionMsg('This pick has no real Kalshi ticker — can’t place a real order.'); return false; }
+    const count = contractsFor(p.stakeForTargetCents / 100, p.priceCents);
+    const r = await placeRealOrder({ ticker: p.ticker, side: 'yes', action: 'buy', count, priceCents: p.priceCents }, `(${p.team} to win)`);
+    if (!r) { pickActionMsg('Order canceled — nothing placed.'); return false; }
+    await call('/api/open', { team: p.team, opponent: p.opponent, ticker: p.ticker, kind: p.kind, priceCents: p.priceCents, stakeDollars: count * p.priceCents / 100, gameState: p.gameState || null });
+    flashDecision(`💵 Real order placed: BUY ${count} × ${p.ticker} @ ${p.priceCents}¢ (also tracked on paper).`);
+    return true;
+  }
+  await call('/api/open', { team: p.team, opponent: p.opponent, ticker: p.ticker || p.team, kind: p.kind, priceCents: p.priceCents, stakeDollars: p.stakeForTargetCents / 100, gameState: p.gameState || null });
+  return true;
+}
+
+// Live Game Board: ONE click on a game opens it straight into Live Data Update (no
+// select-then-"Open selected" step). Staging to tweak first is still on each card.
+async function openLiveCard(el) {
+  const src = el.dataset.src === 'live' ? lastLivegame : lastPregame;
+  const p = src && src.actionRanking[+el.dataset.i];
+  if (!p) return;
+  clearPickActionMsg();
+  if (!realTradingOn() && p.affordable === false && !confirm(`${pickText(p)} needs ${fmt(p.stakeForTargetCents)}, more than your available cash. Open anyway?`)) return;
+  el.classList.add('selected'); // brief visual feedback while it opens
+  try {
+    const ok = await openOnePick(p);
+    if (!ok) { el.classList.remove('selected'); return; }
+    await refresh(); if (realTradingOn()) await refreshTradeStatus();
+    flashDecision(`✅ Opened ${pickText(p)} — now in Live Data Update below.`);
+    document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { el.classList.remove('selected'); pickActionMsg(e.message); }
+}
+
+// Stage a single card's pick into "Enter a position" to tweak stake/price before opening.
+function stageOne(i, srcName) {
+  const src = srcName === 'live' ? lastLivegame : lastPregame;
+  const p = src && src.actionRanking[+i];
+  if (p) { stageRow(p); document.querySelector('.area.pre')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+
 // Open the selected picks immediately at their target stake — no staging step.
 async function openSelectedNow() {
   const picks = getSelectedPicks();
   if (!picks.length) { pickActionMsg('👆 Click a pick card to select it first (it turns blue), then Open selected now.'); return; }
   clearPickActionMsg();
-
-  // 💵 ARMED live trading: place a REAL buy order (one pick at a time for safety), then keep
-  // a paper record so the app still tracks it. Disarmed/sim falls through to the paper flow.
-  if (realTradingOn()) {
-    if (picks.length > 1) { pickActionMsg('💵 Real-order mode: select just ONE pick at a time.'); return; }
-    const p = picks[0];
-    if (!isRealTicker(p.ticker)) { pickActionMsg('This pick has no real Kalshi ticker — can’t place a real order.'); return; }
-    const count = contractsFor(p.stakeForTargetCents / 100, p.priceCents);
-    try {
-      const r = await placeRealOrder({ ticker: p.ticker, side: 'yes', action: 'buy', count, priceCents: p.priceCents }, `(${p.team} to win)`);
-      if (!r) { pickActionMsg('Order canceled — nothing placed.'); return; }
-      // Mirror it on paper (stake = the contracts we actually ordered) so tracking continues.
-      await call('/api/open', { team: p.team, opponent: p.opponent, ticker: p.ticker, kind: p.kind, priceCents: p.priceCents, stakeDollars: count * p.priceCents / 100, gameState: p.gameState || null });
-      clearPickSelection(); await refresh(); await refreshTradeStatus();
-      flashDecision(`💵 Real order placed: BUY ${count} × ${p.ticker} @ ${p.priceCents}¢ (also tracked on paper).`);
-      document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch (e) { pickActionMsg('💵 Order failed: ' + e.message); }
-    return;
-  }
-
-  const unaffordable = picks.filter((p) => !p.affordable).length;
+  if (realTradingOn() && picks.length > 1) { pickActionMsg('💵 Real-order mode: open ONE pick at a time.'); return; }
+  const unaffordable = realTradingOn() ? 0 : picks.filter((p) => !p.affordable).length;
   if (unaffordable && !confirm(`${unaffordable} selected pick(s) exceed your available cash. Open anyway?`)) return;
   try {
+    let opened = 0;
     for (const p of picks) {
-      await call('/api/open', {
-        team: p.team, opponent: p.opponent, ticker: p.ticker || p.team, kind: p.kind,
-        priceCents: p.priceCents, stakeDollars: p.stakeForTargetCents / 100,
-        gameState: p.gameState || null,
-      });
+      if (await openOnePick(p)) opened++;
+      else if (realTradingOn()) return; // a declined/blocked real order stops the batch
     }
     clearPickSelection();
-    await refresh();
-    flashDecision(`✅ Opened ${picks.length} position${picks.length === 1 ? '' : 's'}.`);
-    document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    await refresh(); if (realTradingOn()) await refreshTradeStatus();
+    if (opened) {
+      flashDecision(`✅ Opened ${opened} position${opened === 1 ? '' : 's'}.`);
+      document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   } catch (e) { pickActionMsg(e.message); }
 }
 async function openRowFrom(tr) {
