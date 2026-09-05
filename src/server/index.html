@@ -228,7 +228,7 @@
       <span class="tag">scan live games and jump in mid-game</span><span class="chev">▾</span></h2>
     <div class="body">
       <div class="row" style="margin-bottom:10px">
-        <div style="flex:0 0 auto"><label>Sport</label><select id="liveSportSel" onchange="setLiveSport(this.value)"><option value="mlb">⚾ MLB</option><option value="nfl">🏈 NFL</option><option value="nhl">🏒 NHL</option></select></div>
+        <div style="flex:0 0 auto"><label>Sport</label><select id="liveSportSel" onchange="setLiveSport(this.value)"><option value="mlb">⚾ MLB</option><option value="nfl">🏈 NFL</option><option value="cfb">🎓 CFB</option><option value="nhl">🏒 NHL</option></select></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button onclick="livegame()">📋 Rank live games</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm play-btn" onclick="playPause()">▶ Play</button></div>
         <div class="sim-only" style="flex:0 0 auto"><label>&nbsp;</label><button class="sm ghost" onclick="advanceOnce()">⏭ Advance</button></div>
@@ -481,7 +481,7 @@ function setMode(m) {
 // choice, reloads that sport's board + positions, and (in sim) resets the game clock to
 // the new format, re-pacing a running Play loop since step counts differ per sport.
 function setLiveSport(s) {
-  liveSport = ['mlb', 'nfl', 'nhl'].includes(s) ? s : 'mlb';
+  liveSport = ['mlb', 'nfl', 'cfb', 'nhl'].includes(s) ? s : 'mlb';
   localStorage.setItem('liveSport', liveSport);
   const sel = $('liveSportSel'); if (sel) sel.value = liveSport;
   gameStep = 0; setGameClock('');              // fresh clock for the new format
@@ -738,6 +738,7 @@ let gameStep = 0;
 const GAME_FORMATS = {
   mlb: { totalSteps: 18, label: (s) => `${s % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(s / 2) + 1}` },
   nfl: { totalSteps: 12, label: (s) => `Q${Math.floor(s / 3) + 1} ${['15:00', '10:00', '5:00'][s % 3]}` },
+  cfb: { totalSteps: 12, label: (s) => `Q${Math.floor(s / 3) + 1} ${['15:00', '10:00', '5:00'][s % 3]}` },
   nhl: { totalSteps: 9,  label: (s) => `P${Math.floor(s / 3) + 1} ${['20:00', '13:20', '6:40'][s % 3]}` },
 };
 function currentSport() { return GAME_FORMATS[liveSport] ? liveSport : 'mlb'; }

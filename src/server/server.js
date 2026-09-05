@@ -23,10 +23,11 @@ import { HistoricalDecisionEngine } from '../ranking/historicalDecisionEngine.js
 import { findReplacements } from '../ranking/dynamicReplacement.js';
 import { computeGoalPath } from '../report/goalPath.js';
 import { loadState, saveState } from '../data/store.js';
-import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, KALSHI_MLB_SERIES, KALSHI_NFL_SERIES, KALSHI_NHL_SERIES, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
+import { KalshiMarketProvider, KALSHI_PROD, KALSHI_DEMO, KALSHI_MLB_SERIES, KALSHI_NFL_SERIES, KALSHI_NHL_SERIES, KALSHI_NCAAF_SERIES, mlbTickerDate, mlbTickerGameNumber } from '../data/kalshiMarketProvider.js';
 import * as mlbFeed from '../data/mlbLiveFeed.js';
 import * as nflFeed from '../data/nflLiveFeed.js';
 import * as nhlFeed from '../data/nhlLiveFeed.js';
+import * as cfbFeed from '../data/cfbLiveFeed.js';
 import { etDateStr } from '../data/mlbLiveFeed.js'; // ET game-day helper — sport-agnostic
 
 // ---- sport registry: one entry per supported live sport. Each bundles its Kalshi
@@ -68,11 +69,25 @@ const SPORTS = {
     winProb: nhlFeed.fetchWinProb,
     gameNumber: () => null,                // NHL has no doubleheaders
   },
+  cfb: {
+    key: 'cfb', label: 'CFB', emoji: '🎓', series: KALSHI_NCAAF_SERIES,
+    teamKey: cfbFeed.abbrFromKalshi,       // Kalshi label -> normalized school key
+    fetchGames: cfbFeed.fetchLiveGames,
+    findGame: cfbFeed.findGameFor,
+    isInProgress: cfbFeed.isInProgress,
+    isFinal: (g) => g.state === 'post',
+    stateLabel: cfbFeed.quarterLabel,      // "Q3 5:20" / "OT" / "Halftime"
+    winner: cfbFeed.winnerAbbr,
+    winProb: cfbFeed.fetchWinProb,
+    gameNumber: () => null,                // no doubleheaders
+  },
 };
 const sportFor = (s) => SPORTS[s] || SPORTS.mlb;
 // Infer a position's sport from its ticker when the field isn't stored (older positions).
 const sportOfTicker = (t) =>
-  /^KXNFLGAME/.test(t || '') ? 'nfl' : /^KXNHLGAME/.test(t || '') ? 'nhl' : 'mlb';
+  /^KXNCAAFGAME/.test(t || '') ? 'cfb'
+  : /^KXNFLGAME/.test(t || '') ? 'nfl'
+  : /^KXNHLGAME/.test(t || '') ? 'nhl' : 'mlb';
 // A game's score line, e.g. "Orioles 2–1 Rays" (MLB) or "WSH 17–21 DAL" (NFL).
 const scoreLine = (g) => `${g.away} ${g.awayScore}–${g.homeScore} ${g.home}`;
 
@@ -143,7 +158,7 @@ function readBalanceCents(b) {
   return null;
 }
 const LIVE_TTL_MS = 8000;
-const liveCaches = { mlb: { at: 0, board: [] }, nfl: { at: 0, board: [] }, nhl: { at: 0, board: [] } }; // per-sport board cache
+const liveCaches = { mlb: { at: 0, board: [] }, nfl: { at: 0, board: [] }, nhl: { at: 0, board: [] }, cfb: { at: 0, board: [] } }; // per-sport board cache
 
 // Map Kalshi's grouped games into board candidates (one per priced team side), tagged
 // verified + source so the UI can badge them 🟢 and never confuse them with sim.
@@ -320,6 +335,12 @@ const NHL_TEAMS = [
   'Penguins', 'Capitals', 'Blackhawks', 'Avalanche', 'Stars', 'Wild', 'Predators', 'Blues',
   'Jets', 'Utah', 'Ducks', 'Kings', 'Sharks', 'Kraken', 'Flames', 'Oilers', 'Canucks', 'Golden Knights',
 ];
+const CFB_TEAMS = [
+  'Alabama', 'Georgia', 'Ohio State', 'Michigan', 'Texas', 'Oregon', 'Penn State', 'Notre Dame',
+  'LSU', 'Tennessee', 'Ole Miss', 'Oklahoma', 'USC', 'Florida State', 'Clemson', 'Miami',
+  'Washington', 'Utah', 'Wisconsin', 'Iowa', 'Oklahoma State', 'Kansas State', 'Missouri', 'Auburn',
+  'Florida', 'Texas A&M', 'Nebraska', 'UCLA', 'North Carolina', 'Louisville', 'Kentucky', 'Arizona',
+];
 
 // Per-sport SIMULATION clock: how many steps a regulation game runs, and the label per
 // step. MLB = 18 half-innings, NFL = 12 (4 quarters × 3), NHL = 9 (3 periods × 3).
@@ -327,6 +348,7 @@ const SIM_FORMATS = {
   mlb: { steps: 18, teams: MLB_TEAMS, label: (s) => { const x = ((s % 18) + 18) % 18; return `${x % 2 === 0 ? 'Top' : 'Bot'} ${Math.floor(x / 2) + 1}`; } },
   nfl: { steps: 12, teams: NFL_TEAMS, label: (s) => { const x = ((s % 12) + 12) % 12; return `Q${Math.floor(x / 3) + 1} ${['15:00', '10:00', '5:00'][x % 3]}`; } },
   nhl: { steps: 9,  teams: NHL_TEAMS, label: (s) => { const x = ((s % 9) + 9) % 9;   return `P${Math.floor(x / 3) + 1} ${['20:00', '13:20', '6:40'][x % 3]}`; } },
+  cfb: { steps: 12, teams: CFB_TEAMS, label: (s) => { const x = ((s % 12) + 12) % 12; return `Q${Math.floor(x / 3) + 1} ${['15:00', '10:00', '5:00'][x % 3]}`; } },
 };
 const simSport = (s) => (SIM_FORMATS[s] ? s : 'mlb');
 
