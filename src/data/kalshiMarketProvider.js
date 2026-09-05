@@ -299,9 +299,16 @@ export class KalshiMarketProvider extends MarketProvider {
 
   /** Place an order via the Kalshi V2 create-order endpoint. WRITE — actually buys/sells on
    *  the account. `order` is validated and shaped (bid/ask, fixed-point) by buildOrderPayload.
-   *  Returns Kalshi's order response (id, status, fills). */
+   *  Kalshi shards markets across exchange instances (Baseball/Tennis/Crypto are dedicated),
+   *  so we route with exchange_index=-1 + market_ticker to auto-target the ticker's exchange
+   *  (otherwise it defaults to index 0 and 404s "Exchange user not found"). Query params are
+   *  not part of the signature. Returns Kalshi's order response (id, status, fills). */
   createOrder(order) {
-    return this.request('POST', '/portfolio/events/orders', { body: buildOrderPayload(order) });
+    const body = buildOrderPayload(order);
+    return this.request('POST', '/portfolio/events/orders', {
+      query: { exchange_index: -1, market_ticker: body.ticker },
+      body,
+    });
   }
 
   /** Cancel a resting order by id. WRITE. */
