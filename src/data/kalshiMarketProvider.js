@@ -120,31 +120,32 @@ export function signKalshi(privateKeyPem, timestampMs, method, path) {
 }
 
 /**
- * Build a Kalshi order request body from plain inputs. Pure + validated so it can be unit
- * tested without hitting the network. Kalshi wants: side yes|no, action buy|sell, an integer
- * count >= 1, and for a limit order a 1..99¢ price on the matching side (yes_price/no_price).
- * A market order carries no price. A client_order_id makes the write idempotent (a retry or
- * double-click with the same id won't place a second order).
+ * Build a Kalshi V2 create-order body (POST /portfolio/events/orders) from plain inputs.
+ * Pure + validated so it can be unit tested without hitting the network.
+ *
+ * The V2 order book is single-sided: `side` is "bid" (buy YES) or "ask" (sell YES); this
+ * app trades the YES side, so action buy→bid, sell→ask. `count` and `price` are fixed-point
+ * STRINGS — count to 2 decimals ("1.00"), price in DOLLARS to 4 decimals ("0.5400", = 54¢).
+ * A limit order rests as good_till_canceled; a market order is immediate_or_cancel. A
+ * client_order_id makes the write idempotent (a retry/double-click won't place a second order).
  */
-export function buildOrderPayload({ ticker, side = 'yes', action = 'buy', count, priceCents, type = 'limit', clientOrderId } = {}) {
+export function buildOrderPayload({ ticker, action = 'buy', count, priceCents, type = 'limit', clientOrderId } = {}) {
   if (!ticker || typeof ticker !== 'string') throw new Error('order needs a ticker');
-  const s = side === 'no' ? 'no' : 'yes';
-  const a = action === 'sell' ? 'sell' : 'buy';
   const n = Math.floor(Number(count));
   if (!Number.isFinite(n) || n < 1) throw new Error('order count must be an integer >= 1');
-  const t = type === 'market' ? 'market' : 'limit';
+  const isMarket = type === 'market';
   const payload = {
     ticker,
+    side: action === 'sell' ? 'ask' : 'bid',        // bid = buy YES, ask = sell YES
+    count: n.toFixed(2),                            // fixed-point string, e.g. "1.00"
+    time_in_force: isMarket ? 'immediate_or_cancel' : 'good_till_canceled',
+    self_trade_prevention_type: 'taker_at_cross',
     client_order_id: clientOrderId || crypto.randomUUID(),
-    side: s,
-    action: a,
-    count: n,
-    type: t,
   };
-  if (t === 'limit') {
+  if (!isMarket) {
     const p = Math.round(Number(priceCents));
     if (!Number.isFinite(p) || p < 1 || p > 99) throw new Error('limit price must be 1..99 cents');
-    if (s === 'yes') payload.yes_price = p; else payload.no_price = p;
+    payload.price = (p / 100).toFixed(4);           // fixed-point DOLLARS, e.g. "0.5400"
   }
   return payload;
 }
@@ -296,10 +297,11 @@ export class KalshiMarketProvider extends MarketProvider {
     return this.request('GET', '/portfolio/positions', { query: { ticker } });
   }
 
-  /** Place an order. WRITE — actually buys/sells on the account. `order` is validated and
-   *  shaped by buildOrderPayload. Returns Kalshi's order response (id, status, fills). */
+  /** Place an order via the Kalshi V2 create-order endpoint. WRITE — actually buys/sells on
+   *  the account. `order` is validated and shaped (bid/ask, fixed-point) by buildOrderPayload.
+   *  Returns Kalshi's order response (id, status, fills). */
   createOrder(order) {
-    return this.request('POST', '/portfolio/orders', { body: buildOrderPayload(order) });
+    return this.request('POST', '/portfolio/events/orders', { body: buildOrderPayload(order) });
   }
 
   /** Cancel a resting order by id. WRITE. */
