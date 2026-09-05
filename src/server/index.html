@@ -284,6 +284,7 @@
         </div>
         <span class="live-only muted" style="font-size:12px;display:none">🔴 Live mode — real games decide the outcome; use “🔄 Update (u)” or Auto-refresh above. (Simulation controls are in ⚪ Simulation mode.)</span>
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:auto"><input type="checkbox" id="autoLockCb" style="width:auto" onchange="toggleAutoLock()"> 🔒 Auto-lock at target</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px" title="Bank a near-certain winner early (price ≥ 97¢) even if it nets a hair under target, so a late reversal can't take it back."><input type="checkbox" id="aggressiveLockCb" style="width:auto" onchange="toggleAggressiveLock()"> ⚡ Aggressive lock (bank sure wins)</label>
       </div>
       <div class="sim-only muted" style="font-size:12px;margin-top:2px">plays the full game clock; each step advances an inning / quarter / period and drifts prices</div>
 
@@ -975,6 +976,12 @@ function renderGoalPath(g) {
 // Auto-lock: close any position whose unrealized pure profit has reached the target.
 let autoLock = localStorage.getItem('autoLock') !== 'false'; // default ON
 function toggleAutoLock() { autoLock = $('autoLockCb').checked; localStorage.setItem('autoLock', autoLock); if (autoLock) refresh(); }
+// Aggressive lock: bank a near-CERTAIN winner early (price ≥ threshold) even if exiting nets
+// a hair under target — securing it against a late reversal. Default OFF (it's a money move,
+// and it gives up the small exit fee vs riding to settlement).
+const AGGRESSIVE_LOCK_CENTS = 97;
+let aggressiveLock = localStorage.getItem('aggressiveLock') === 'true';
+function toggleAggressiveLock() { aggressiveLock = $('aggressiveLockCb').checked; localStorage.setItem('aggressiveLock', aggressiveLock); if (aggressiveLock) refresh(); }
 
 // ---- goal-seeking loop: bank a hit target, start a fresh round ----
 // Default ON, but only ever fires when the round is truly done (target realized AND no
@@ -1034,6 +1041,18 @@ async function refresh() {
           if (pos && pos.currentPriceCents != null) await call('/api/close', { id: pos.id, exitPriceCents: pos.currentPriceCents });
         }
         flashDecision(`🔒 Auto-locked target: ${gp.lockPlan.map((l) => l.team).join(' + ')}`);
+        return refresh();
+      }
+    }
+    // aggressive lock: a position priced ≥ threshold is essentially a won bet — bank it now
+    // (in profit), before a late swing can take it back, even if it's a hair under target.
+    if (aggressiveLock) {
+      const sure = state.snapshot.positions.filter((p) =>
+        p.status === 'open' && p.currentPriceCents != null &&
+        p.currentPriceCents >= AGGRESSIVE_LOCK_CENTS && (p.unrealizedPureProfitCents ?? 0) > 0);
+      if (sure.length) {
+        for (const p of sure) await call('/api/close', { id: p.id, exitPriceCents: p.currentPriceCents });
+        flashDecision(`🔒⚡ Aggressive-locked ${sure.map((p) => p.team ?? p.ticker).join(' + ')} at ${sure[0].currentPriceCents}¢ — banked the near-sure win.`);
         return refresh();
       }
     }
@@ -1517,6 +1536,7 @@ async function openQuickPick(i) {
 }
 
 $('autoLockCb').checked = autoLock;
+if ($('aggressiveLockCb')) $('aggressiveLockCb').checked = aggressiveLock;
 applyMode();
 refresh();
 </script>
