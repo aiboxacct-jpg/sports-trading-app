@@ -252,6 +252,7 @@
         <span class="auto-live-status" style="font-size:12px"></span>
         <span class="muted" style="font-size:12px;margin-left:auto">auto-updates your positions' price, inning &amp; score every 12s · or press <b>u</b></span>
       </div>
+      <div id="roundWin" hidden></div>
       <div id="goalPath"></div>
       <div id="targetMonitor"></div>
       <table>
@@ -993,9 +994,32 @@ function toggleAggressiveLock() { aggressiveLock = $('aggressiveLockCb').checked
 let autoRound = localStorage.getItem('autoRound') !== 'false';
 let roundResetting = false;
 function toggleAutoRound() { autoRound = $('autoRoundCb').checked; localStorage.setItem('autoRound', autoRound); if (autoRound) refresh(); }
+// Persistent "you hit the target" celebration. The auto-round loop banks a won round and
+// resets in the same instant, so the target monitor never dwells on ACHIEVED — this banner
+// (tied to the banked total growing, independent of render order) makes the win unmissable.
+let lastBankedCents = null;
+let roundWinTimer = null;
+function showRoundWin(deltaCents, totalCents, rounds) {
+  const el = $('roundWin'); if (!el) return;
+  el.innerHTML = `<div class="target-alert pulse" style="margin:8px 0;font-size:14px">🎉🎯 TARGET REACHED — you banked <b>${fmt(deltaCents)}</b>! ` +
+    `(round ${rounds} done · ${fmt(totalCents)} banked total) A fresh round has started.</div>`;
+  el.hidden = false;
+  if (roundWinTimer) clearTimeout(roundWinTimer);
+  roundWinTimer = setTimeout(() => { el.hidden = true; }, 12000); // lingers 12s so you see it
+}
 function renderBanked(banked) {
   const b = banked || { cents: 0, rounds: 0 };
-  const el = $('banked'); if (el) { el.textContent = b.cents ? fmt(b.cents) : '$0.00'; el.className = b.cents > 0 ? 'pos' : (b.cents < 0 ? 'neg' : ''); }
+  const el = $('banked');
+  if (el) {
+    el.textContent = b.cents ? fmt(b.cents) : '$0.00';
+    el.className = b.cents > 0 ? 'pos' : (b.cents < 0 ? 'neg' : '');
+    // Banked total grew => a round just completed at/above target: celebrate + flash the KPI.
+    if (lastBankedCents != null && b.cents > lastBankedCents) {
+      showRoundWin(b.cents - lastBankedCents, b.cents, b.rounds);
+      el.classList.remove('flash-good'); void el.offsetWidth; el.classList.add('flash-good');
+    }
+  }
+  lastBankedCents = b.cents;
   const r = $('bankedRounds'); if (r) r.textContent = b.rounds ? '(' + b.rounds + '✓)' : '';
 }
 // Show/hide the new-round controls when the target is realized; auto-start if opted in
