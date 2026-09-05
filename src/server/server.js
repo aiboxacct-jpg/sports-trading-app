@@ -540,6 +540,16 @@ const api = {
     return { snapshot: book(mode).engine.snapshot() };
   },
 
+  // Change the profit target live — WITHOUT clearing the bankroll, positions, or history.
+  // Re-sizes every "Size to +target" board and the target monitor immediately.
+  'POST /api/target': (body, mode) => {
+    const bk = book(mode);
+    const cents = Math.round(Number(body.targetDollars) * 100);
+    if (Number.isFinite(cents) && cents > 0) bk.engine.targetCents = cents;
+    const snapshot = bk.engine.snapshot();
+    return { snapshot, goalPath: computeGoalPath(snapshot), banked: bankedInfo(bk) };
+  },
+
   // Bank a completed target round and start fresh: add the round's realized profit to the
   // lifetime "banked" tally, bump the rounds-won count, then reset the bankroll (KEEPING
   // history + missed so the learning engine carries over). This is the goal-seeking loop.
@@ -909,7 +919,7 @@ const api = {
 
 // Routes that change state and must be persisted after handling.
 const MUTATING = new Set([
-  '/api/reset', '/api/clear', '/api/newround', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
+  '/api/reset', '/api/clear', '/api/newround', '/api/target', '/api/price', '/api/open', '/api/close', '/api/settle', '/api/gamestate',
   '/api/missed/log', '/api/missed/resolve', '/api/missed/clear',
   '/api/livegame/refresh', '/api/livegame/tick', '/api/livegame/new', '/api/live/sync',
 ]);

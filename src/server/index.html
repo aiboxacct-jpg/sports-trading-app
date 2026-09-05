@@ -153,7 +153,7 @@
   </div>
   <div class="setup">
     start $<input id="startDollars" type="number" value="100" />
-    target $<input id="targetDollars" type="number" value="5" />
+    target $<input id="targetDollars" type="number" value="5" onchange="onTargetChange()" />
     <button class="sm" onclick="newGame()">🎮 New game</button>
     <button class="ghost sm" onclick="reset()">Reset</button>
     <button class="ghost sm" onclick="clearAll()">🧹 Clear all</button>
@@ -489,6 +489,17 @@ function sizing() {
 function onStakeChange() {
   // Re-size every already-rendered board so stake / size-mode changes show up everywhere,
   // not just in the Pre-Game report. (The Live Game Board was previously left stale.)
+  if ($('pregameOut') && $('pregameOut').innerHTML.trim()) pregame();
+  if ($('livegameOut') && $('livegameOut').innerHTML.trim()) livegame();
+  refresh();
+}
+// Changing the profit target applies it to the CURRENT round live (no new game needed) and
+// re-sizes every "Size to +target" board + the target monitor.
+async function onTargetChange() {
+  const dollars = +$('targetDollars').value;
+  if (!(dollars > 0)) return;
+  try { await call('/api/target', { targetDollars: dollars }); }
+  catch (e) { $('liveErr').textContent = e.message; return; }
   if ($('pregameOut') && $('pregameOut').innerHTML.trim()) pregame();
   if ($('livegameOut') && $('livegameOut').innerHTML.trim()) livegame();
   refresh();
