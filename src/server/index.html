@@ -1385,8 +1385,8 @@ async function openLiveCard(el) {
     const ok = await openOnePick(p);
     if (!ok) { el.classList.remove('selected'); return; }
     await refresh(); if (realTradingOn()) await refreshTradeStatus();
+    // Stay on the Live Game Board (no scroll) so rapid picks don't shift the list under you.
     flashDecision(`✅ Opened ${pickText(p)} — now in Live Data Update below.`);
-    document.querySelector('.area.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) { el.classList.remove('selected'); pickActionMsg(e.message); }
 }
 
