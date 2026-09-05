@@ -500,6 +500,11 @@ function sizing() {
 }
 // Re-rank when the stake/sizing changes (it sets the tone for every pick).
 function onStakeChange() {
+  // Remember the stake + sizing mode so they persist across reloads / new rounds / sessions.
+  try {
+    if ($('sizeMode')) localStorage.setItem('sizeMode', $('sizeMode').value);
+    if ($('rStake')) localStorage.setItem('rStake', $('rStake').value);
+  } catch (e) { /* storage may be blocked; ignore */ }
   // Re-size every already-rendered board so stake / size-mode changes show up everywhere,
   // not just in the Pre-Game report. (The Live Game Board was previously left stale.)
   if ($('pregameOut') && $('pregameOut').innerHTML.trim()) pregame();
@@ -1565,6 +1570,13 @@ async function openQuickPick(i) {
 
 $('autoLockCb').checked = autoLock;
 if ($('aggressiveLockCb')) $('aggressiveLockCb').checked = aggressiveLock;
+// Restore the remembered stake + sizing mode (defaults stay if nothing was saved).
+try {
+  const savedSize = localStorage.getItem('sizeMode');
+  if (savedSize && $('sizeMode')) $('sizeMode').value = savedSize;
+  const savedStake = localStorage.getItem('rStake');
+  if (savedStake && $('rStake')) $('rStake').value = savedStake;
+} catch (e) { /* storage may be blocked; keep defaults */ }
 applyMode();
 refresh();
 </script>
