@@ -517,9 +517,13 @@ function resolveCandidate(c, i, engine) {
 
 // Sizing options from a request: fixed stake (respect the user's dollars) or size-to-target.
 function sizingOpts(body) {
+  // lockAtCents (1..99): when set, "Size to +target" buffers the stake so CLOSING at that
+  // price already nets the target — used by the client's aggressive-lock mode.
+  const lock = body && Number(body.lockAtCents);
   return {
     sizeMode: body && body.sizeMode === 'fixed' ? 'fixed' : 'target',
     stakeCents: body && body.stakeDollars != null ? toCents(Number(body.stakeDollars)) : undefined,
+    lockExitCents: Number.isFinite(lock) && lock >= 1 && lock <= 99 ? Math.round(lock) : undefined,
   };
 }
 

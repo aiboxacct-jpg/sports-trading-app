@@ -491,7 +491,11 @@ function setLiveSport(s) {
 
 // Current sizing preference: fixed dollar stake, or size-to-target.
 function sizing() {
-  return { stakeDollars: +$('rStake').value || 1, sizeMode: ($('sizeMode') && $('sizeMode').value) || 'fixed' };
+  const s = { stakeDollars: +$('rStake').value || 1, sizeMode: ($('sizeMode') && $('sizeMode').value) || 'fixed' };
+  // In "Size to +target" with aggressive lock on, buffer the stake so an early lock at the
+  // threshold price already nets the full target (the server sizes to this exit price).
+  if (aggressiveLock && s.sizeMode === 'target') s.lockAtCents = AGGRESSIVE_LOCK_CENTS;
+  return s;
 }
 // Re-rank when the stake/sizing changes (it sets the tone for every pick).
 function onStakeChange() {
@@ -981,7 +985,7 @@ function toggleAutoLock() { autoLock = $('autoLockCb').checked; localStorage.set
 // and it gives up the small exit fee vs riding to settlement).
 const AGGRESSIVE_LOCK_CENTS = 97;
 let aggressiveLock = localStorage.getItem('aggressiveLock') === 'true';
-function toggleAggressiveLock() { aggressiveLock = $('aggressiveLockCb').checked; localStorage.setItem('aggressiveLock', aggressiveLock); if (aggressiveLock) refresh(); }
+function toggleAggressiveLock() { aggressiveLock = $('aggressiveLockCb').checked; localStorage.setItem('aggressiveLock', aggressiveLock); onStakeChange(); }
 
 // ---- goal-seeking loop: bank a hit target, start a fresh round ----
 // Default ON, but only ever fires when the round is truly done (target realized AND no

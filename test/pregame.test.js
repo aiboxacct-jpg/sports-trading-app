@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { stakeForTarget, fixedStake, buildPreGameReport, addCombos } from '../src/report/preGameReport.js';
+import { tradeFeeCents } from '../src/domain/fees.js';
 import { SimEngine } from '../src/engine/simEngine.js';
 import { HistoricalDecisionEngine } from '../src/ranking/historicalDecisionEngine.js';
 
@@ -49,6 +50,27 @@ test('stakeForTarget clears target for a range of prices', () => {
     const r = stakeForTarget(price, 500);
     assert.ok(r.potentialProfitCents >= 500, `price ${price} should reach target`);
   }
+});
+
+test('stakeForTarget with lockExitCents: an EARLY close at the lock price clears the target', () => {
+  const feeRate = 0.07, lock = 97;
+  const r = stakeForTarget(70, 500, feeRate, { lockExitCents: lock });
+  // Buffered so closing at 97¢ (charged an exit fee) already nets >= target...
+  const exitProfit = r.contracts * (lock - 70) - r.entryFeeCents - tradeFeeCents(r.contracts, lock, feeRate);
+  assert.ok(exitProfit >= 500, `early lock should clear target, got ${exitProfit}`);
+  assert.equal(r.lockProfitCents, exitProfit);
+  // ...and it's a bigger stake than the default (win-sized) version.
+  const plain = stakeForTarget(70, 500, feeRate);
+  assert.ok(r.contracts > plain.contracts, 'buffered sizing uses more contracts');
+  // Display profit is still the (larger) WIN profit.
+  assert.ok(r.potentialProfitCents > exitProfit);
+});
+
+test('stakeForTarget without lockExitCents is unchanged (win-sized, default arg)', () => {
+  const a = stakeForTarget(59, 500, 0.07);
+  const b = stakeForTarget(59, 500, 0.07, {});
+  assert.deepEqual(a, b);
+  assert.equal(a.lockProfitCents, undefined);
 });
 
 test('pre-game report ranks, sizes to target, and flags concentration', () => {

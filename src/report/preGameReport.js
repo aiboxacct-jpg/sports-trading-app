@@ -22,18 +22,32 @@ import { tradeFeeCents } from '../domain/fees.js';
  * nudge it under target, add contracts until it clears.
  * Returns null when the price can't reach the target at all.
  */
-export function stakeForTarget(priceCents, targetCents, feeRate) {
+export function stakeForTarget(priceCents, targetCents, feeRate, { lockExitCents } = {}) {
   assertPrice(priceCents);
-  const profitPerContract = 100 - priceCents; // cents, before fees
+  // Default: size so a WINNING SETTLEMENT (pays 100¢, and settlement is fee-free) nets the
+  // target. With lockExitCents, size so CLOSING early at that price already nets the target —
+  // that exit pays contracts×(lockExit−price) AND is charged an exit fee — so an aggressive
+  // lock at/above that price still clears the goal (a bigger stake, buffered for the fee gap).
+  const exit = lockExitCents != null ? lockExitCents : 100;
+  const profitPerContract = exit - priceCents; // cents, before fees
   if (profitPerContract <= 0) return null;
 
   let contracts = Math.ceil(targetCents / profitPerContract);
   // Bump for fees, with a safety bound so we never loop forever.
   for (let guard = 0; guard < 100000; guard++) {
-    const fee = tradeFeeCents(contracts, priceCents, feeRate);
-    const potential = contracts * profitPerContract - fee;
+    const entryFee = tradeFeeCents(contracts, priceCents, feeRate);
+    const exitFee = lockExitCents != null ? tradeFeeCents(contracts, exit, feeRate) : 0; // settlement is free
+    const potential = contracts * profitPerContract - entryFee - exitFee;
     if (potential >= targetCents) {
-      return { contracts, stakeCents: contracts * priceCents, potentialProfitCents: potential, entryFeeCents: fee };
+      // Always report the WIN profit for display ("+$X on a win"); it's ≥ the lock profit.
+      const winProfit = contracts * (100 - priceCents) - entryFee;
+      return {
+        contracts,
+        stakeCents: contracts * priceCents,
+        potentialProfitCents: lockExitCents != null ? winProfit : potential,
+        entryFeeCents: entryFee,
+        lockProfitCents: lockExitCents != null ? potential : undefined,
+      };
     }
     contracts += 1;
   }
@@ -87,7 +101,7 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const comboPriceCents = (legs) =>
   Math.max(1, Math.min(99, Math.round(legs.reduce((a, l) => a * (l.priceCents / 100), 1) * 100)));
 
-export function evaluate(cand, { targetCents, cashCents, feeRate, historical, stakeCents, sizeMode }) {
+export function evaluate(cand, { targetCents, cashCents, feeRate, historical, stakeCents, sizeMode, lockExitCents }) {
   const kind = cand.kind ?? 'single';
   const status = cand.status ?? 'open';
 
@@ -108,7 +122,7 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical, st
 
   const sized = (sizeMode === 'fixed' && stakeCents != null)
     ? fixedStake(priceCents, stakeCents, feeRate)
-    : stakeForTarget(priceCents, targetCents, feeRate);
+    : stakeForTarget(priceCents, targetCents, feeRate, { lockExitCents });
   if (!sized) return { excluded: true, id: cand.id, team: cand.team, reason: sizeMode === 'fixed' ? 'stake too small for one contract' : 'price too high to reach target' };
   const reachesTarget = sized.potentialProfitCents >= targetCents;
 
@@ -215,11 +229,11 @@ function narrate(item, targetCents) {
  * @param {Array}  board     candidate markets (prices resolved)
  * @param {Object} opts      { feeRate, historical }
  */
-export function buildPreGameReport(snapshot, board, { feeRate, historical, stakeCents, sizeMode, mode = 'SIMULATION' } = {}) {
+export function buildPreGameReport(snapshot, board, { feeRate, historical, stakeCents, sizeMode, lockExitCents, mode = 'SIMULATION' } = {}) {
   const targetCents = snapshot.target.targetCents;
   const cashCents = snapshot.bankroll.currentCashCents;
 
-  const evaluated = board.map((c) => evaluate(c, { targetCents, cashCents, feeRate, historical, stakeCents, sizeMode }));
+  const evaluated = board.map((c) => evaluate(c, { targetCents, cashCents, feeRate, historical, stakeCents, sizeMode, lockExitCents }));
   const ranked = evaluated.filter((e) => !e.excluded)
     .sort((a, b) => b.score - a.score || b.evCents - a.evCents || b.priceCents - a.priceCents);
   const excluded = evaluated.filter((e) => e.excluded);
