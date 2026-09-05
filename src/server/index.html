@@ -561,9 +561,7 @@ function renderSnapshot(snap) {
       <td>${fmt(p.currentValueCents)}</td>
       <td class="${cls(p.unrealizedPureProfitCents)}">${fmt(p.unrealizedPureProfitCents)}</td>
       <td>
-        <button class="sm" onclick="closePos('${p.id}','np-${p.id}','${String(p.ticker || '').replace(/'/g, "\\'")}','${String(p.team || '').replace(/'/g, "\\'")}')">Close</button>
-        <button class="sm ghost" onclick="settle('${p.id}','win')">Win</button>
-        <button class="sm ghost" onclick="settle('${p.id}','loss')">Loss</button></td></tr>`;
+        <button class="sm" onclick="closePos('${p.id}','np-${p.id}','${String(p.ticker || '').replace(/'/g, "\\'")}','${String(p.team || '').replace(/'/g, "\\'")}')">Close</button></td></tr>`;
   }).join('') : '<tr><td colspan="8" class="muted">No open positions. Enter one in Pre-Game.</td></tr>';
   // remember this render's prices so the next refresh can flash on movement
   prevPrices = {};
@@ -1093,10 +1091,6 @@ async function closePos(id, inputId, ticker, team) {
     }
     await call('/api/close', { id, exitPriceCents: price }); await refresh();
   } catch (e) { $('liveErr').textContent = e.message; }
-}
-async function settle(id, outcome) {
-  try { await call('/api/settle', { id, outcome }); await refresh(); }
-  catch (e) { $('liveErr').textContent = e.message; }
 }
 
 // ---- ranking board ----
