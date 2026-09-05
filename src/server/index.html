@@ -487,7 +487,10 @@ function sizing() {
 }
 // Re-rank when the stake/sizing changes (it sets the tone for every pick).
 function onStakeChange() {
+  // Re-size every already-rendered board so stake / size-mode changes show up everywhere,
+  // not just in the Pre-Game report. (The Live Game Board was previously left stale.)
   if ($('pregameOut') && $('pregameOut').innerHTML.trim()) pregame();
+  if ($('livegameOut') && $('livegameOut').innerHTML.trim()) livegame();
   refresh();
 }
 
