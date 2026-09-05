@@ -115,6 +115,13 @@
   #autoLiveStatus .dot { color: var(--good); animation: livepulse 1.1s ease-in-out infinite; }
   @keyframes flashgood { 0% { background: #d7f5e0; } 100% { background: transparent; } }
   .flash-good { animation: flashgood .9s ease-out; }
+  /* Target alert banner — pulses green as you approach / can lock / have hit the target. */
+  @keyframes blinkgreen { 0%, 100% { background: #eafaf0; } 50% { background: #9ff0bd; } }
+  .target-alert { border-radius: 8px; padding: 8px 12px; margin: 2px 0 10px; font-weight: 800;
+    border: 1px solid var(--good); border-left: 4px solid var(--good); color: #12662b; font-size: 13px; }
+  .target-alert.pulse { animation: blinkgreen 1s ease-in-out infinite; }
+  .target-bar { height: 7px; border-radius: 4px; background: #e6e9ee; overflow: hidden; margin-top: 6px; }
+  .target-bar > span { display: block; height: 100%; background: var(--good); transition: width .3s ease; }
 </style>
 </head>
 <body>
@@ -587,12 +594,29 @@ function renderTargetMonitor(snap) {
   if (!el) return;
   const t = snap.target, b = snap.bankroll, target = t.targetCents;
   const withinReach = t.state === 'TARGET AVAILABLE' || t.state === 'TARGET LOCKED';
-  const approaching = t.realizableIfExitNowCents >= target / 2 && t.state === 'TARGET NOT REACHED';
+  // How much of the target you could bank by exiting everything right now (0..1).
+  const reachFrac = target > 0 ? Math.max(0, Math.min(1, t.realizableIfExitNowCents / target)) : 0;
+  const approaching = reachFrac >= 0.5 && t.state === 'TARGET NOT REACHED';
   const achieved = t.state === 'TARGET REALIZED';
   const yn = (v) => (v ? '✅' : '❌');
-  el.innerHTML = `<div style="font-weight:700;font-size:12px;margin:4px 0 6px">💰 Target monitor</div>
+
+  // Prominent, pulsing green banner so you actually SEE the target coming (and landing).
+  let banner = '';
+  if (achieved) {
+    banner = `<div class="target-alert pulse">🎉 TARGET ACHIEVED — banked ${fmt(b.realizedPureProfitCents)} (≥ ${fmt(target)})</div>`;
+  } else if (withinReach) {
+    banner = `<div class="target-alert pulse">🚨🎯 TARGET AVAILABLE — you can lock ${fmt(t.realizableIfExitNowCents)} now. ${autoLock ? 'Auto-lock will secure it.' : 'Hit Close to bank it (or turn on 🔒 Auto-lock).'}</div>`;
+  } else if (approaching) {
+    banner = `<div class="target-alert pulse">🟢 Getting close — ${Math.round(reachFrac * 100)}% of target reachable now (${fmt(t.realizableIfExitNowCents)} of ${fmt(target)}).</div>`;
+  }
+  const barPct = Math.round(reachFrac * 100);
+
+  el.innerHTML = banner +
+    `<div style="font-weight:700;font-size:12px;margin:4px 0 6px">💰 Target monitor</div>
+    <div class="target-bar"><span style="width:${barPct}%"></span></div>
+    <div class="muted" style="font-size:11px;margin:2px 0 8px">${barPct}% of ${fmt(target)} reachable by exiting now</div>
     <table style="margin-bottom:12px"><tbody>
-      <tr><td class="muted">Starting bankroll</td><td>${fmt(b.startingBankrollCents)}</td><td class="muted">Progress</td><td>${Math.round(t.realizedProgress * 100)}%</td></tr>
+      <tr><td class="muted">Starting bankroll</td><td>${fmt(b.startingBankrollCents)}</td><td class="muted">Realized progress</td><td>${Math.round(t.realizedProgress * 100)}%</td></tr>
       <tr><td class="muted">Realized profit</td><td class="${cls(b.realizedPureProfitCents)}">${fmt(b.realizedPureProfitCents)}</td><td class="muted">Within reach</td><td>${yn(withinReach)}</td></tr>
       <tr><td class="muted">Potential profit</td><td class="${cls(b.unrealizedPureProfitCents)}">${fmt(b.unrealizedPureProfitCents)}</td><td class="muted">Approaching</td><td>${yn(approaching)}</td></tr>
       <tr><td class="muted">Target</td><td>${fmt(target)}</td><td class="muted">Achieved</td><td>${yn(achieved)}</td></tr>
