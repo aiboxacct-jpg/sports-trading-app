@@ -90,6 +90,7 @@ test('buildOrderPayload shapes a V2 YES limit buy: side bid, fixed-point count/p
     time_in_force: 'good_till_canceled',
     self_trade_prevention_type: 'taker_at_cross',
     client_order_id: 'coid-1',
+    exchange_index: -1,                // auto-route to the ticker's shard
     price: '0.6200',                   // dollars, 4dp (= 62¢)
   });
 });

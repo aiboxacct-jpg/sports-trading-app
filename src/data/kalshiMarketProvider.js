@@ -141,6 +141,7 @@ export function buildOrderPayload({ ticker, action = 'buy', count, priceCents, t
     time_in_force: isMarket ? 'immediate_or_cancel' : 'good_till_canceled',
     self_trade_prevention_type: 'taker_at_cross',
     client_order_id: clientOrderId || crypto.randomUUID(),
+    exchange_index: -1,                             // -1 = auto-route to the ticker's exchange shard
   };
   if (!isMarket) {
     const p = Math.round(Number(priceCents));
