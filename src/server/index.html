@@ -545,10 +545,14 @@ async function call(path, body) {
   // (SIMULATION vs LIVE) — they never share a bankroll, positions, or history.
   const isPost = body !== undefined && body !== null;
   const url = isPost ? path : path + (path.includes('?') ? '&' : '?') + 'mode=' + appMode + '&sport=' + liveSport;
+  const payload = isPost ? { mode: appMode, ...body } : undefined;
+  // A caller can pass sport explicitly (e.g. sport: null = all sports); otherwise the
+  // league toggle's selection rides along as before.
+  if (payload && !('sport' in payload)) payload.sport = liveSport;
   const res = await fetch(url, {
     method: isPost ? 'POST' : 'GET',
     headers: isPost ? { 'Content-Type': 'application/json' } : {},
-    body: isPost ? JSON.stringify({ ...body, mode: appMode, sport: liveSport }) : undefined,
+    body: isPost ? JSON.stringify(payload) : undefined,
   });
   const data = await res.json();
   if (!res.ok || data.ok === false) throw new Error(data.error || 'request failed');
@@ -1242,7 +1246,9 @@ function withMeta(resp) {
 // hypothetical sample board in simulation mode.
 async function boardForRanking() {
   if (!isLive()) return gatherBoard();
-  const resp = await call('/api/live/board', sizing());
+  // sport: null => the pre-game board scans ALL sports (MLB/NFL/NHL/CFB), each row
+  // carrying its sport icon. (Section 3's Live Game Board keeps using the league toggle.)
+  const resp = await call('/api/live/board', { ...sizing(), sport: null });
   withMeta(resp);
   return lastLiveCandidates;
 }
@@ -1313,7 +1319,7 @@ function renderLiveGame(pg) {
     else if (it.gameState && /Final/.test(it.gameState)) stateChip = `<span class="upcoming">🏁 ${it.gameState}</span>`;
     else if (startTxt) stateChip = `<span class="upcoming">⏰ ${startTxt}</span>`;
     html += `<div class="pick-card" data-src="live" data-i="${i}" onclick="openLiveCard(this)" title="Click to open this position">
-        <div>${badge}<span class="medal">${it.medal}</span> ${pickText(it)} ${stateChip}
+        <div>${badge}<span class="medal">${it.medal}</span> ${sportIcon(it)}${pickText(it)} ${stateChip}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         <div class="why">${it.why}</div>
         ${it.warning ? `<div class="neg" style="font-size:12px">${it.warning}</div>` : ''}
