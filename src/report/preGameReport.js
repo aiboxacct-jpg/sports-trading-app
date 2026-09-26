@@ -71,6 +71,7 @@ export function addCombos(board, { maxCombos = 20 } = {}) {
         id: `combo-${a.id ?? a.team}-${b.id ?? b.team}`,
         kind: 'combo',
         team: `${a.team} + ${b.team}`,
+        sport: a.sport && a.sport === b.sport ? a.sport : null, // icon only when both legs share a sport
         gameTime: a.gameTime || b.gameTime || null,
         status: 'open',
         legs: [
@@ -168,6 +169,7 @@ export function evaluate(cand, { targetCents, cashCents, feeRate, historical, st
     kind,
     verified: cand.verified ?? false, // 🟢 real Kalshi price vs ⚪ simulated/entered
     source: cand.source ?? null,      // e.g. 'KALSHI'
+    sport: cand.sport ?? null,        // 'mlb' | 'nfl' | 'nhl' | 'cfb' — shown as an icon in the UI
     live: cand.live ?? false,         // 🔴 game in progress right now
     startTime: cand.startTime ?? null,
     gameTime: cand.gameTime ?? null,
@@ -269,7 +271,7 @@ export function buildPreGameReport(snapshot, board, { feeRate, historical, stake
     },
     quickBoard: ranked.map((r) => ({
       rank: r.rank, medal: r.medal, team: r.team, opponent: r.opponent, kind: r.kind,
-      ticker: r.ticker, verified: r.verified, source: r.source, live: r.live, startTime: r.startTime,
+      ticker: r.ticker, verified: r.verified, source: r.source, sport: r.sport, live: r.live, startTime: r.startTime,
       priceCents: r.priceCents, marketProbabilityPct: r.marketProbabilityPct,
       payoutMultiple: r.payoutMultiple, legs: r.legs,
       edgePct: r.edgePct, evCents: r.evCents, estProbPct: r.estProbPct,

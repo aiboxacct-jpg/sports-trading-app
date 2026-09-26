@@ -529,6 +529,7 @@ function resolveCandidate(c, i, engine) {
     id: c.id || `cand-${i + 1}`, team: c.team, opponent: c.opponent,
     kind: c.kind === 'combo' ? 'combo' : 'single',
     verified: c.verified === true, source: c.source || null, // keep 🟢 real-price provenance
+    sport: c.sport || null, // keep the sport so the UI can show its icon
     gameTime: c.gameTime || null, gameState: c.gameState || null, status: c.status || 'open',
   };
   if (base.kind === 'combo') {
@@ -709,18 +710,25 @@ const api = {
     };
   },
 
-  // Real board from Kalshi for the chosen sport, ranked by the edge/EV engine — LIVE book.
+  // Real board from Kalshi, ranked by the edge/EV engine — LIVE book.
+  // With no sport requested this scans ALL supported sports (MLB/NFL/NHL/CFB) so the
+  // pre-game board shows every upcoming game, each tagged with its sport for the UI icons.
   'POST /api/live/board': async (body) => {
     const bk = books.live;
-    const sport = sportFor(body.sport);
-    const board = await liveKalshiBoard(sport);
+    const sports = body.sport ? [sportFor(body.sport)] : Object.values(SPORTS);
+    const perSport = await Promise.all(sports.map(async (s) => {
+      try { return await liveKalshiBoard(s); }
+      catch { return []; } // one sport's feed down shouldn't blank the whole board
+    }));
+    const board = perSport.flat();
     return {
       livegame: buildPreGameReport(bk.engine.snapshot(), board, {
         feeRate: bk.engine.feeRate, historical: historicalEngine(bk.history), mode: 'LIVE', ...sizingOpts(body),
       }),
       candidates: board, // raw real-price board so ranking/pre-game/replacements can reuse it
-      asOf: new Date(liveCaches[sport.key].at).toISOString(),
-      priced: board.length, source: 'KALSHI', sport: sport.key,
+      asOf: new Date().toISOString(),
+      priced: board.length, source: 'KALSHI',
+      sports: sports.map((s) => s.key),
       base: liveBaseLabel(kalshiProvider().baseUrl),
     };
   },

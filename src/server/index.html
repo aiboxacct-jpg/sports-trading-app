@@ -188,6 +188,7 @@
     <h2 class="collapser" onclick="toggle(this)"><span class="num">1</span> Pre-Game — Action Ranking (hypothetical board)
       <span class="tag">scan the whole board, then enter a pick</span><span class="chev">▾</span></h2>
     <div class="body">
+      <div class="muted" style="font-size:11px;margin-bottom:8px">⚾ MLB · 🏈 NFL · 🏒 NHL · 🎓 CFB — today's upcoming games across sports (hover an icon for the league)</div>
       <div id="pregameOut"></div>
       <div class="row" style="margin-bottom:10px">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button class="ghost" onclick="rank()">Quick rank</button></div>
@@ -328,6 +329,14 @@ function pickText(item) {
   return (item.kind === 'combo')
     ? `🎯 Parlay: <b>${item.team}</b> <span class="muted">(all legs must win)</span>`
     : `🎯 <b>${item.team ?? item.ticker}</b> to win${item.opponent ? ` <span class="muted">vs ${item.opponent}</span>` : ''}`;
+}
+// Sport icon for a ranked pick (hover shows the league name). Empty when unknown.
+const SPORT_EMOJI = { mlb: '⚾', nfl: '🏈', nhl: '🏒', cfb: '🎓' };
+const SPORT_LABEL = { mlb: 'MLB', nfl: 'NFL', nhl: 'NHL', cfb: 'College football' };
+function sportIcon(item) {
+  const key = item && item.sport;
+  const emoji = key && SPORT_EMOJI[key];
+  return emoji ? `<span title="${SPORT_LABEL[key] || key}">${emoji}</span> ` : '';
 }
 
 function toggle(h) {
@@ -1194,11 +1203,11 @@ async function closePos(id, inputId, ticker, team) {
 // engine. In Live Play mode the ranking tools use real Kalshi games (see boardForRanking).
 function gatherBoard() {
   return [
-    { team: 'Yankees', opponent: 'Red Sox', kind: 'single', priceCents: 62 },
-    { team: 'Astros', opponent: 'Mariners', kind: 'single', priceCents: 48 },
-    { team: 'Rays', opponent: 'Blue Jays', kind: 'single', priceCents: 44 },
-    { team: 'Brewers', opponent: 'Reds', kind: 'single', priceCents: 71 },
-    { team: 'Marlins', opponent: 'Braves', kind: 'single', priceCents: 12 },
+    { team: 'Yankees', opponent: 'Red Sox', kind: 'single', priceCents: 62, sport: 'mlb' },
+    { team: 'Astros', opponent: 'Mariners', kind: 'single', priceCents: 48, sport: 'mlb' },
+    { team: 'Rays', opponent: 'Blue Jays', kind: 'single', priceCents: 44, sport: 'mlb' },
+    { team: 'Brewers', opponent: 'Reds', kind: 'single', priceCents: 71, sport: 'mlb' },
+    { team: 'Marlins', opponent: 'Braves', kind: 'single', priceCents: 12, sport: 'mlb' },
   ];
 }
 
@@ -1485,9 +1494,10 @@ function renderPreGame(pg) {
   html += '<table><thead><tr><th></th><th>Pick</th><th>Kalshi</th><th title="your history when you have it, else the live win-probability model">Est&nbsp;%</th><th>Edge</th><th>EV</th><th>Payout</th><th>Stake</th><th>%cash</th></tr></thead><tbody>';
   for (const r of pg.quickBoard) {
     const badge = r.verified ? '<span title="real Kalshi price">🟢</span> ' : '';
+    const icon = sportIcon(r);
     const label = r.kind === 'combo'
-      ? `🎯 <b>${r.team}</b> <span class="muted">(parlay: ${(r.legs || []).map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}; all must win)</span>`
-      : `${badge}${pickText(r)}`;
+      ? `${icon}🎯 <b>${r.team}</b> <span class="muted">(parlay: ${(r.legs || []).map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}; all must win)</span>`
+      : `${icon}${badge}${pickText(r)}`;
     const edgeCls = r.edgePct > 0 ? 'pos' : r.edgePct < 0 ? 'neg' : '';
     html += `<tr>
       <td class="medal">${r.medal}</td>
@@ -1529,7 +1539,7 @@ function renderPreGame(pg) {
 
   pg.actionRanking.forEach((it, i) => {
     html += `<div class="pick-card" data-src="pre" data-i="${i}" onclick="togglePick(this)">
-        <div><span class="medal">${it.medal}</span> ${pickText(it)}
+        <div><span class="medal">${it.medal}</span> ${sportIcon(it)}${pickText(it)}
           <span class="muted">— ${it.priceCents}¢ · ${it.marketProbabilityPct}% · ${it.payoutMultiple}× payout · score ${it.score}</span></div>
         ${it.legs ? `<div class="muted" style="font-size:11px">combo legs: ${it.legs.map((l) => l.team + ' ' + l.priceCents + '¢').join(' + ')}</div>` : ''}
         <div class="why">${it.why}</div>
@@ -1553,7 +1563,7 @@ function renderRanking(r) {
   r.ranked.forEach((it, i) => {
     html += `<tr class="rankrow" onclick="openQuickPick(${i})" title="Click to enter this position">
       <td class="medal">${it.medal}</td>
-      <td>${pickText(it)}</td>
+      <td>${sportIcon(it)}${pickText(it)}</td>
       <td><b>${it.score}</b></td>
       <td>${it.marketProbabilityPct}%</td>
       <td>${fmt(it.riskCents)}</td>
