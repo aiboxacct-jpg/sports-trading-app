@@ -223,12 +223,24 @@ export class KalshiMarketProvider extends MarketProvider {
   }
 
   /** List markets, optionally filtered to a series (e.g. an MLB game series). */
-  async listMarkets({ seriesTicker, eventTicker, status = 'open', limit = 100 } = {}) {
-    const { markets = [] } = await this.request('GET', '/markets', {
-      query: { series_ticker: seriesTicker, event_ticker: eventTicker, status, limit },
-    });
-    for (const m of markets) this.#cache(m);
-    return markets;
+  async listMarkets({ seriesTicker, eventTicker, status = 'open', limit = 100, paginate = false, maxPages = 10 } = {}) {
+    // Kalshi returns the most recently listed markets first, so a single page can
+    // crowd out older-created games (e.g. today's slate behind future weeks).
+    // With paginate: true, follow the response cursor until exhausted (safety cap).
+    const all = [];
+    let cursor = null;
+    let pages = 0;
+    do {
+      const query = { series_ticker: seriesTicker, event_ticker: eventTicker, status, limit };
+      if (cursor) query.cursor = cursor;
+      const { markets = [], cursor: next } = await this.request('GET', '/markets', { query });
+      for (const m of markets) this.#cache(m);
+      all.push(...markets);
+      cursor = next || null;
+      pages++;
+      if (!markets.length) break;
+    } while (paginate && cursor && pages < maxPages);
+    return all;
   }
 
   /** Fetch one market and cache its price. */
@@ -247,7 +259,9 @@ export class KalshiMarketProvider extends MarketProvider {
    * start) so callers can show just "today's slate" instead of every listed day.
    */
   async listMlbGames({ seriesTicker = KALSHI_MLB_SERIES, status = 'open', limit = 300, withinHoursAhead, withinHoursBehind = 6 } = {}) {
-    const markets = await this.listMarkets({ seriesTicker, status, limit });
+    // Paginate: without it, newly listed future slates crowd today's games out of the
+    // single page (Kalshi serves most-recently-listed first).
+    const markets = await this.listMarkets({ seriesTicker, status, limit, paginate: true });
     const byEvent = new Map();
     for (const raw of markets) {
       const m = normalizeMarket(raw);

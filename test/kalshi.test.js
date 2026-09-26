@@ -136,3 +136,49 @@ test('normalizeMarket treats 0/100 placeholders as absent (no invented price)', 
   assert.equal(m.priceCents, 53);  // falls through to the bid
   assert.equal(m.hasLiquidity, false); // vol 0 and not two-sided
 });
+
+const mockProvider = () => {
+  const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  return new KalshiMarketProvider({ apiKeyId: 'test-key-id', privateKeyPem: pem, baseUrl: 'https://x' });
+};
+const mockMarket = (ticker) => ({ ticker, title: ticker + ' wins', yes_bid_dollars: '0.4000', yes_ask_dollars: '0.4200' });
+
+test('listMarkets follows cursors and concatenates pages when paginate:true', async () => {
+  const k = mockProvider();
+  const pages = [
+    { markets: [mockMarket('A'), mockMarket('B')], cursor: 'c1' },
+    { markets: [mockMarket('C')], cursor: '' }, // empty cursor = exhausted
+  ];
+  const cursorsSeen = [];
+  k.request = async (_m, _e, { query } = {}) => { cursorsSeen.push(query?.cursor ?? null); return pages.shift() ?? { markets: [] }; };
+  const out = await k.listMarkets({ seriesTicker: 'KXNCAAFGAME', paginate: true });
+  assert.deepEqual(out.map((m) => m.ticker), ['A', 'B', 'C']);
+  assert.deepEqual(cursorsSeen, [null, 'c1']); // first page uncursored, second follows c1
+});
+
+test('listMarkets does NOT paginate by default (single page even with a cursor)', async () => {
+  const k = mockProvider();
+  let calls = 0;
+  k.request = async () => { calls++; return { markets: [mockMarket('A'), mockMarket('B')], cursor: 'c1' }; };
+  const out = await k.listMarkets({ seriesTicker: 'KXNCAAFGAME' });
+  assert.equal(out.length, 2);
+  assert.equal(calls, 1);
+});
+
+test('listMarkets paginate:true respects the maxPages safety cap', async () => {
+  const k = mockProvider();
+  let calls = 0;
+  k.request = async () => { calls++; return { markets: [mockMarket('X')], cursor: 'forever' }; };
+  const out = await k.listMarkets({ seriesTicker: 'KXNCAAFGAME', paginate: true, maxPages: 3 });
+  assert.equal(calls, 3);
+  assert.equal(out.length, 3);
+});
+
+test('listMlbGames requests pagination so older-created games are not crowded out', async () => {
+  const k = mockProvider();
+  let gotPaginate = null;
+  k.listMarkets = async (opts) => { gotPaginate = opts.paginate; return []; };
+  await k.listMlbGames({ seriesTicker: 'KXNCAAFGAME' });
+  assert.equal(gotPaginate, true);
+});
